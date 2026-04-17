@@ -1,0 +1,56 @@
+# Beauty Category SOP (Makeup / Skincare / Fragrance / Hair)
+
+**TRIGGER:** Apply if Category is Beauty, Makeup, Skincare, Fragrance, or Hair.
+
+**GOLDEN RULE:** Verify if the applicant fits the "Sephora-level" standard. They must have EITHER excellent inventory (Sephora/Ulta quality) OR strong hosting capabilities.
+
+---
+
+## PART A: Investigation Data Points
+
+### 1. Inventory & Visual Audit
+- **Brand Tiering:**
+  - Sephora/Ulta Level: Fenty, Rare Beauty, Tatcha, Estee Lauder, Laneige, Charlotte Tilbury
+  - Drugstore/Target Level: CoverGirl, Maybelline, Revlon, Wet n Wild, CeraVe
+- **Visual Presentation (Crucial):**
+  - Boutique Vibe: Clean background, good lighting, curated, professional
+  - Garage Sale Vibe: Messy, cluttered, bad lighting, unappealing
+- **Stock Reality:** Real/Physical photos or Stock Images? Affiliate links (LTK/Amazon)?
+- **Risk Keywords:** "GWP", "Tester", "Not for sale"
+- **Reputation:** Star Rating
+
+### 2. Social Credibility (Platform Specific)
+- Platform: Whatnot, IG/FB, or TikTok?
+- Follower Count + Followers vs Following ratio
+- Engagement: WN Bookmarks, Avg Viewers, Live frequency
+
+### 3. Identity & Reputation
+- Referral names (RikersBeautyAuctions, BeautyBlitzWholesale, CaitieCo)
+- Ban indicators: "Account Suspended", "User not found"
+- US-Based status
+
+---
+
+## PART B: Verdict Decision
+
+### STEP 1: Tier Classification (highest met, platform-weighted)
+
+| Tier | IG/FB/WN Followers | TikTok Followers | Other Signals |
+|------|-------------------|-----------------|---------------|
+| **S (VIP)** | >10,000 | >50,000 | VIP Referral, WN Bookmarks >50, Avg Viewers >100, Premier/Ambassador II |
+| **A (Ideal)** | 5,000–10,000 | 10,000–50,000 | WN Bookmarks 20-50, Sephora brands, Boutique vibe, Rating >=4.9 |
+| **B (Rookie)** | 1,000–5,000 | 5,000–10,000 | WN Bookmarks 10-20, Curated Sephora/Ulta, Live history |
+| **F (Reject)** | <1,000 | <5,000 | WN Bookmarks <10, Drugstore only |
+
+### STEP 2: Risk Classification
+
+- **HIGH (Blocker):** Garage Sale vibe, ONLY drugstore brands, ONLY GWP/Testers, banned, fake followers
+- **MEDIUM:** Follower:Following ratio <1:1, non-US
+- **LOW:** US-based, physical inventory, boutique presentation, Sephora brands
+
+### STEP 3: Routing
+
+1. VIP Referral OR Tier S → **ESCALATE_TO_RAJ**
+2. Pure Influencer (high followers, no stock) → **FLAG_TO_JAMES** (Affiliate candidate)
+3. HIGH RISK or Tier F (no VIP referral) → **REJECT**
+4. (Tier A or B) + LOW RISK → **APPROVE**
