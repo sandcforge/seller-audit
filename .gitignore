@@ -8,6 +8,7 @@ __pycache__/
 # Local environment files
 .env
 .env.*
+AGENTS.md
 
 # Secrets
 skills/seller-audit/assets/bq-reader-key.json

@@ -6,15 +6,14 @@ Two methods — always try **Method 1 (BigQuery script)** first. Fall back to **
 
 ## Method 1: BigQuery Script (Default)
 
-The script queries `plantstory.hubspot.Contact` in BigQuery via a service account. Runs inside the sandbox — no user action needed.
+The script queries `plantstory.hubspot.Contact` in BigQuery via sandbox `gcloud` Application Default Credentials (ADC).
 
 ### 1.1 Location
 
-Both the script and its GCP service-account key are bundled inside this skill:
+The script is bundled inside this skill:
 
 ```
-skills/seller-audit/scripts/bq_query_seller.py    # script
-skills/seller-audit/assets/bq-reader-key.json     # service account key (read-only BQ access)
+skills/seller-audit/scripts/bq_query_seller.py
 ```
 
 The script resolves these paths relative to its own location, so you can invoke
@@ -25,19 +24,20 @@ it from any working directory. Output JSONs are written to the project-level
 
 ```bash
 # From the project root:
-python skills/seller-audit/scripts/bq_query_seller.py --email "seller@example.com"
+python skills/seller-audit/scripts/bq_query_seller.py --query "seller@example.com"
+python skills/seller-audit/scripts/bq_query_seller.py --query "palmstreet_username"
+python skills/seller-audit/scripts/bq_query_seller.py --query "Firstname Lastname"
 python skills/seller-audit/scripts/bq_query_seller.py --vid 205494706259
-python skills/seller-audit/scripts/bq_query_seller.py --userid "Md3TvlyWXsZafB1HowPYmn6xa192"
 ```
 
-The script writes `outputs/seller_{identifier}.json` with the whitelisted row (see Section 1.4) and prints a summary of key fields.
+`--query` returns a list of matching VIds plus summary fields. `--vid` writes the full whitelisted row to `outputs/seller_{vid}.json` and prints a summary of key fields.
 
 ### 1.3 Dependencies
 
-If `google.cloud.bigquery` is not installed:
+Run the script from the project `.venv` after `./setup.sh` completes:
 
 ```bash
-pip install google-cloud-bigquery --break-system-packages
+UV_CACHE_DIR=.uv-cache .venv/bin/python skills/seller-audit/scripts/bq_query_seller.py --query "seller@example.com"
 ```
 
 ### 1.4 Fields in the BigQuery row
@@ -87,7 +87,7 @@ Map BQ column → audit field:
 
 Switch to Method 2 if any of:
 - `No results found` for an email/vid/userid you know exists
-- Script import/auth error that can't be fixed quickly (e.g., key revoked)
+- Script auth error that can't be fixed quickly (e.g., ADC missing or expired)
 - Data in BQ looks stale (BQ sync runs on a delay — if HubSpot was updated in the last few hours, the UI may be fresher)
 
 ---

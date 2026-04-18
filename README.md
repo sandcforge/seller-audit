@@ -23,16 +23,6 @@ Ignored by default:
 - `.uv-cache/`
 - `outputs/`
 - macOS metadata such as `.DS_Store`
-- BigQuery service account keys
-
-## Required Secrets
-
-The BigQuery scripts expect a service account key at these paths:
-
-- `skills/seller-audit/assets/bq-reader-key.json`
-- `skills/seller-extract/assets/bq-reader-key.json`
-
-These files are intentionally ignored by git. Distribute them through your normal secret-sharing process, not through the repository.
 
 ## Fresh Machine Setup
 
@@ -56,7 +46,7 @@ uv --version
 gcloud --version
 ```
 
-If `gcloud` is missing, install Google Cloud SDK first. If `uv` is missing, install it before creating the project environment.
+If `gcloud` is missing, install Google Cloud SDK first. If `uv` is missing, the bootstrap script can install a project-local copy automatically.
 
 ### 2. Create the local Python environment
 
@@ -70,20 +60,7 @@ This creates a local `.venv` from `pyproject.toml` and `uv.lock`.
 
 ### 3. Authenticate BigQuery access
 
-The BigQuery scripts support two auth paths:
-
-#### Option A: Service account key
-
-If your team provides a read-only BigQuery key, place it at either:
-
-- `skills/seller-audit/assets/bq-reader-key.json`
-- `skills/seller-extract/assets/bq-reader-key.json`
-
-If that file exists, the Python scripts will use it automatically.
-
-#### Option B: gcloud Application Default Credentials
-
-If you do not have a local service-account key, use `gcloud` Application Default Credentials (ADC).
+This repository uses sandbox `gcloud` Application Default Credentials (ADC) only.
 
 1. Log into Google Cloud in the browser:
 
@@ -109,18 +86,20 @@ Notes:
 
 - `gcloud auth login` is optional for this repo. The important command for the Python BigQuery client is `gcloud auth application-default login`.
 - Successful ADC login usually writes credentials to `~/.config/gcloud/application_default_credentials.json`.
+- `./setup.sh` checks `gcloud`, validates ADC, and starts the ADC login flow automatically if credentials are missing.
 
 ### 4. Verify the repo can query seller data
 
 Run a known lookup:
 
 ```bash
-UV_CACHE_DIR=.uv-cache .venv/bin/python skills/seller-extract/scripts/bq_query_seller.py --email "seller@example.com"
+UV_CACHE_DIR=.uv-cache .venv/bin/python skills/seller-audit/scripts/bq_query_seller.py --query "seller@example.com"
+UV_CACHE_DIR=.uv-cache .venv/bin/python skills/seller-audit/scripts/bq_query_seller.py --vid 205494706259
 ```
 
 If successful, the script will:
 
-- print `Found 1 record(s).` or similar output
+- print `Found N record(s).` or similar output
 - write a JSON file into `outputs/`
 
 ## Run Scripts
@@ -128,8 +107,9 @@ If successful, the script will:
 Examples:
 
 ```bash
-UV_CACHE_DIR=.uv-cache .venv/bin/python skills/seller-extract/scripts/bq_query_seller.py --email "seller@example.com"
-UV_CACHE_DIR=.uv-cache .venv/bin/python skills/seller-extract/scripts/bq_query_latest.py 10 outputs/latest-scan
+UV_CACHE_DIR=.uv-cache .venv/bin/python skills/seller-audit/scripts/bq_query_seller.py --query "seller@example.com"
+UV_CACHE_DIR=.uv-cache .venv/bin/python skills/seller-audit/scripts/bq_query_seller.py --query "succulent" --limit 10
+UV_CACHE_DIR=.uv-cache .venv/bin/python skills/seller-audit/scripts/bq_query_seller.py --vid 205494706259
 ```
 
 Common checks:
@@ -161,5 +141,5 @@ Before pushing or sharing:
 If you want a one-command setup, use:
 
 ```bash
-./scripts/setup_env.sh
+./setup.sh
 ```

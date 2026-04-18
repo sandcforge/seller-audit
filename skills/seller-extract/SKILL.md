@@ -16,20 +16,17 @@ This skill is invoked by the seller-audit orchestrator (or manually) when you ne
 Run the bundled script to query `plantstory.hubspot.Contact`:
 
 ```bash
-python skills/seller-extract/scripts/bq_query_seller.py --email "<email>"
-python skills/seller-extract/scripts/bq_query_seller.py --vid <vid>
-python skills/seller-extract/scripts/bq_query_seller.py --userid "<userid>"
+python skills/seller-audit/scripts/bq_query_seller.py --query "<email/name/phone/username>"
+python skills/seller-audit/scripts/bq_query_seller.py --vid <vid>
 ```
 
-The script and its GCP service-account key (`assets/bq-reader-key.json`) are bundled inside this skill. Output goes to `outputs/seller_{id}.json`.
-
-If `google.cloud.bigquery` is not installed: `pip install google-cloud-bigquery --break-system-packages`
+The script uses sandbox `gcloud` Application Default Credentials and writes output to `outputs/`.
 
 ### When to fall back
 
 Switch to Method 2 if:
 - `No results found` for a known email/vid/userid
-- Script import/auth error (e.g., key revoked)
+- Script auth error (e.g., ADC missing or expired)
 - Data looks stale (BQ sync runs on a delay)
 
 ## Method 2: Chrome on HubSpot UI (Fallback)
@@ -78,14 +75,8 @@ Regardless of method, produce this structured summary before returning:
 
 ## Batch Extraction
 
-For batch audits, use `bq_query_latest.py` to fetch the latest N applicants:
-
-```bash
-python skills/seller-extract/scripts/bq_query_latest.py 10
-```
-
-This writes individual JSON files to `outputs/` and a `_manifest.json` index.
+For search-style extraction, use query mode to get matching VIds first, then use `--vid` for full details.
 
 ## Security Note
 
-The `assets/bq-reader-key.json` is a GCP service account key with read-only BigQuery access. Do not commit this file to version control or share it outside the audit team.
+Use sandbox `gcloud` ADC for BigQuery access. Do not add ad hoc credential files to the repository.

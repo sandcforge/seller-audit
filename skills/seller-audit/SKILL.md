@@ -28,7 +28,7 @@ Each stage is a separate skill with isolated context:
 
 Invoke seller-extract (or run inline if simple):
 ```bash
-python skills/seller-extract/scripts/bq_query_seller.py --email "<email>"
+python skills/seller-audit/scripts/bq_query_seller.py --query "<email>"
 ```
 Read the output JSON and produce the Applicant Summary. For full field mapping, see `references/extract-hubspot.md`.
 
@@ -77,10 +77,10 @@ Save the Markdown report to `outputs/audit_{seller_name}.md` and present it to t
 ### Step 1: Batch Extract
 
 ```bash
-python skills/seller-extract/scripts/bq_query_latest.py 10
+python skills/seller-audit/scripts/bq_query_seller.py --query "<name or email>" --limit 10
 ```
 
-This writes individual JSONs and a `_manifest.json` to `outputs/`.
+Then audit the returned VIds one by one with `--vid`.
 
 ### Step 2: Pre-Screen
 
