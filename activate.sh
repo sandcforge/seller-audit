@@ -1,0 +1,237 @@
+# Set up + activate the sandbox in one step. Source this file (don't execute it).
+# Lives at the project root; installs everything under ./sandbox/.
+#
+# First-time use (two steps):
+#   source ./activate.sh
+#   # -> if ADC is missing, prints an OAuth URL and returns. Open it, sign in
+#   #    with a plantstory-BQ-capable Google account, copy the verification
+#   #    code Google shows you on the success page, then:
+#   AUTH_CODE='4/0...' source ./activate.sh
+#
+# Every subsequent session:
+#   source ./activate.sh             # install + ADC no-op; sandbox activated
+#
+# What it sets up (idempotent, everything under ./sandbox/):
+#   1. gcloud SDK in sandbox/google-cloud-sdk/
+#   2. Python 3.12 venv in sandbox/.venv-audit/ with google-cloud-bigquery + pyyaml
+#   3. ADC JSON in sandbox/.config/gcloud/application_default_credentials.json
+#
+# What it activates (every call):
+#   PATH += sandbox/google-cloud-sdk/bin
+#   VIRTUAL_ENV = sandbox/.venv-audit
+#   GOOGLE_APPLICATION_CREDENTIALS = the ADC JSON
+#   CLOUDSDK_CORE_PROJECT = GOOGLE_CLOUD_PROJECT = plantstory
+
+# Must be sourced — activation needs to affect the caller's shell.
+if ! (return 0 2>/dev/null); then
+  echo "activate.sh must be sourced, not executed:  source $0" >&2
+  exit 1
+fi
+
+_ROOT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+_SANDBOX_DIR="$_ROOT_DIR/sandbox"
+# --- 0. ensure sandbox dir exists -----------------------------------------
+# activate.sh lives at the project root; install everything under sandbox/
+# so the root stays clean and the sandbox is self-contained.
+mkdir -p "$_SANDBOX_DIR" || { echo "could not create $_SANDBOX_DIR" >&2; return 1; }
+_GCLOUD_BIN="$_SANDBOX_DIR/google-cloud-sdk/bin/gcloud"
+_VENV_DIR="$_SANDBOX_DIR/.venv-audit"
+_ADC_FILE="$_SANDBOX_DIR/.config/gcloud/application_default_credentials.json"
+_UV_CACHE="$_ROOT_DIR/.uv-cache"
+
+# --- 1. gcloud SDK ---------------------------------------------------------
+if [[ -x "$_GCLOUD_BIN" ]]; then
+  echo "[1/3] gcloud already installed"
+else
+  echo "[1/3] Installing gcloud SDK..."
+  case "$(uname -m)" in
+    aarch64|arm64) _TARBALL="google-cloud-cli-linux-arm.tar.gz" ;;
+    x86_64)        _TARBALL="google-cloud-cli-linux-x86_64.tar.gz" ;;
+    *) echo "Unsupported arch: $(uname -m)" >&2; return 1 ;;
+  esac
+  # FUSE mounts sometimes refuse to create specific test-fixture / cert files
+  # during tar extraction (non-zero exit from tar), but the gcloud binaries
+  # themselves extract fine. So we don't trust tar's exit code — instead we
+  # check for the gcloud binary afterward and only fail if it's missing.
+  ( cd "$_SANDBOX_DIR" \
+    && curl -sSL -o gcloud.tar.gz "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/$_TARBALL" \
+    || { echo "gcloud download failed" >&2; exit 1; } )
+  ( cd "$_SANDBOX_DIR" && tar -xzf gcloud.tar.gz 2>/dev/null; rm -f gcloud.tar.gz 2>/dev/null; true )
+  if [[ ! -x "$_GCLOUD_BIN" ]]; then
+    echo "gcloud install failed: $_GCLOUD_BIN missing after extraction" >&2
+    return 1
+  fi
+  echo "      -> $("$_GCLOUD_BIN" --version | head -1)"
+fi
+
+export PATH="$_SANDBOX_DIR/google-cloud-sdk/bin:$PATH"
+
+# --- 2. venv ---------------------------------------------------------------
+# The venv lives under the FUSE-mounted workspace so it persists across
+# sessions. But uv creates `bin/python` as a symlink into the session's own
+# uv cache (e.g. /sessions/<session>/.local/share/uv/...), which is wiped on
+# session roll. When that happens `bin/python` is a dangling symlink and the
+# venv is unusable. The FUSE mount also refuses to delete the stale symlinks,
+# so in-place `uv venv --clear` can fail. Handle both by falling back to a
+# fresh venv in session-local space (outside the FUSE mount).
+_need_install=0
+
+if [[ -x "$_VENV_DIR/bin/python" ]]; then
+  echo "[2/3] venv already exists"
+else
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "uv not found. Install it:  curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+    return 1
+  fi
+
+  if [[ -d "$_VENV_DIR" ]]; then
+    echo "[2/3] Existing venv at $_VENV_DIR is broken (likely a stale Python symlink from a previous session)."
+    # Try in-place recreation first; --clear will fail on a FUSE mount that
+    # refuses to delete the stale symlinks.
+    if UV_CACHE_DIR="$_UV_CACHE" uv venv --python 3.12 --clear "$_VENV_DIR" 2>/dev/null; then
+      _need_install=1
+    elif [[ "$_SANDBOX_DIR" =~ ^(/sessions/[^/]+)/mnt/ ]]; then
+      _VENV_DIR="${BASH_REMATCH[1]}/.venv-audit"
+      echo "      -> in-place recreation blocked (FUSE). Using session-local venv at $_VENV_DIR"
+      if [[ ! -x "$_VENV_DIR/bin/python" ]]; then
+        UV_CACHE_DIR="$_UV_CACHE" uv venv --python 3.12 "$_VENV_DIR" \
+          || { echo "uv venv (session-local fallback) failed" >&2; return 1; }
+        _need_install=1
+      fi
+    else
+      echo "uv venv --clear failed and no session-local fallback is available" >&2
+      return 1
+    fi
+  else
+    echo "[2/3] Creating venv at $_VENV_DIR..."
+    UV_CACHE_DIR="$_UV_CACHE" uv venv --python 3.12 "$_VENV_DIR" \
+      || { echo "uv venv failed" >&2; return 1; }
+    _need_install=1
+  fi
+
+  if (( _need_install )); then
+    echo "      -> installing google-cloud-bigquery, pyyaml..."
+    UV_CACHE_DIR="$_UV_CACHE" VIRTUAL_ENV="$_VENV_DIR" \
+      uv pip install --quiet google-cloud-bigquery pyyaml \
+      || { echo "uv pip install failed" >&2; return 1; }
+  fi
+fi
+
+# --- 3. ADC ----------------------------------------------------------------
+# PKCE OAuth flow is inlined here so the sandbox has no external script
+# dependencies. Uses the public gcloud installed-app client (same id/secret
+# that ships with every gcloud install — not a real secret).
+_PKCE_FILE="$_SANDBOX_DIR/pkce.json"
+
+if [[ -f "$_ADC_FILE" ]]; then
+  echo "[3/3] ADC already present"
+elif [[ -n "${AUTH_CODE:-}" ]]; then
+  echo "[3/3] Exchanging auth code for refresh token..."
+  if [[ ! -f "$_PKCE_FILE" ]]; then
+    echo "no pkce.json found at $_PKCE_FILE — re-source without AUTH_CODE first to generate the URL" >&2
+    return 1
+  fi
+  python3 - "$AUTH_CODE" "$_PKCE_FILE" "$_ADC_FILE" <<'PYEOF' || { echo "token exchange failed" >&2; return 1; }
+import json, os, sys, urllib.parse, urllib.request
+
+auth_code, pkce_path, adc_path = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(pkce_path) as f:
+    pkce = json.load(f)
+
+data = urllib.parse.urlencode({
+    "code": auth_code,
+    "client_id": pkce["client_id"],
+    "client_secret": pkce["client_secret"],
+    "code_verifier": pkce["code_verifier"],
+    "grant_type": "authorization_code",
+    "redirect_uri": pkce["redirect_uri"],
+}).encode()
+req = urllib.request.Request("https://oauth2.googleapis.com/token", data=data)
+try:
+    resp = json.loads(urllib.request.urlopen(req).read())
+except urllib.error.HTTPError as e:
+    print(f"token endpoint error: {e.read().decode()}", file=sys.stderr)
+    sys.exit(1)
+
+if "refresh_token" not in resp:
+    print(f"no refresh_token in response: {resp}", file=sys.stderr)
+    sys.exit(1)
+
+os.makedirs(os.path.dirname(adc_path), exist_ok=True)
+with open(adc_path, "w") as f:
+    json.dump({
+        "client_id": pkce["client_id"],
+        "client_secret": pkce["client_secret"],
+        "refresh_token": resp["refresh_token"],
+        "type": "authorized_user",
+    }, f, indent=2)
+# Best-effort cleanup; FUSE mounts sometimes refuse deletes. ADC is already
+# written at this point, so a failure here shouldn't abort the flow.
+try:
+    os.remove(pkce_path)
+except OSError:
+    pass
+print(f"ADC written to {adc_path}")
+PYEOF
+  unset AUTH_CODE
+else
+  echo "[3/3] ADC not found. Open this URL, sign in (plantstory BQ access),"
+  echo "then copy the verification code Google shows you on the success page:"
+  echo ""
+  python3 - "$_PKCE_FILE" <<'PYEOF' || { echo "failed to generate OAuth URL" >&2; return 1; }
+import base64, hashlib, json, os, secrets, sys, urllib.parse
+
+pkce_path = sys.argv[1]
+# gcloud's "application-default login" client — ships with every gcloud install.
+# The redirect URL is a Google-hosted page that displays a copyable verification
+# code after sign-in (so no local server or URL-bar extraction is needed).
+client_id = "764086051850-6qr4p6gpi6hn506pt8ejuq83di341hur.apps.googleusercontent.com"
+client_secret = "d-FL95Q19q7MQmFpd7hHD0Ty"
+redirect_uri = "https://sdk.cloud.google.com/applicationdefaultauthcode.html"
+scope = "https://www.googleapis.com/auth/cloud-platform"
+
+verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
+challenge = base64.urlsafe_b64encode(
+    hashlib.sha256(verifier.encode()).digest()
+).decode().rstrip("=")
+
+url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode({
+    "response_type": "code",
+    "client_id": client_id,
+    "redirect_uri": redirect_uri,
+    "scope": scope,
+    "code_challenge": challenge,
+    "code_challenge_method": "S256",
+    "access_type": "offline",
+    "prompt": "consent",
+})
+print(url)
+
+os.makedirs(os.path.dirname(pkce_path), exist_ok=True)
+with open(pkce_path, "w") as f:
+    json.dump({
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "code_verifier": verifier,
+        "redirect_uri": redirect_uri,
+    }, f)
+PYEOF
+  echo ""
+  echo "Then re-source with:  AUTH_CODE='<the 4/0... code>' source ${BASH_SOURCE[0]}"
+  return 2
+fi
+
+# --- Activate --------------------------------------------------------------
+export GOOGLE_APPLICATION_CREDENTIALS="$_ADC_FILE"
+# CLOUDSDK_CORE_PROJECT is read by the gcloud CLI; GOOGLE_CLOUD_PROJECT is
+# read by the google-cloud-python clients (bigquery, etc.). Set both.
+export CLOUDSDK_CORE_PROJECT="plantstory"
+export GOOGLE_CLOUD_PROJECT="plantstory"
+# shellcheck disable=SC1091
+source "$_VENV_DIR/bin/activate"
+
+echo ""
+echo "sandbox ready — gcloud=$(command -v gcloud) venv=$VIRTUAL_ENV adc=$GOOGLE_APPLICATION_CREDENTIALS"
+
+# Tidy internal vars
+unset _SANDBOX_DIR _ROOT_DIR _GCLOUD_BIN _VENV_DIR _ADC_FILE _PKCE_FILE _UV_CACHE _TARBALL _need_install

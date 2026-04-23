@@ -7,6 +7,16 @@ description: "End-to-end PalmStreet seller audit: extract applicant data from Hu
 
 This skill coordinates the end-to-end seller audit pipeline. It dispatches work to three component skills and assembles the final result.
 
+## Prerequisite: Activate the sandbox first
+
+Before running any script in this skill (extract, BQ queries, etc.), source the sandbox so `python`, `gcloud`, ADC, and project env vars are in place. This is idempotent — safe to run at the start of every session.
+
+```bash
+cd <repo-root> && source sandbox/activate.sh
+```
+
+`source` only affects the shell that runs it, so each `Bash` tool call needs to either re-source it or chain the work onto the same command with `&&`. After activation, scripts run with no extra flags (e.g. `python skills/seller-audit/scripts/bq_latest_applications.py --limit 1`). See the project `CLAUDE.md` for details on how `activate.sh` recovers from stale venvs across session resets.
+
 ## Pipeline Overview
 
 ```
