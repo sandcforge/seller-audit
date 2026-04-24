@@ -1,145 +1,71 @@
 # Seller Audit Team
 
-This repository contains the PalmStreet seller audit workflow, including:
-
-- seller data extraction from HubSpot / BigQuery
-- seller investigation skills and scraping helpers
-- seller verdict rendering
-- shared prompts, references, and assets
+PalmStreet seller audit workflow: extract seller data from HubSpot / BigQuery, investigate their online footprint, and render a verdict. Everything runs inside a self-contained sandbox under `./sandbox/` — no global Python or gcloud install required.
 
 ## Repository Layout
 
-- `skills/`: audit skills, scripts, and references
-- `assets/`: shared static resources
-- `outputs/`: generated local outputs only
+- `activate.sh` — one-command sandbox setup + activation. Source this at the start of every session.
+- `skills/` — skill definitions, scripts, and references
+  - `skills/seller-audit/scripts/` — BigQuery helpers (`bq_query_seller.py`, `bq_latest_applications.py`)
+  - `skills/seller-audit/references/` — SOPs, URL normalization rules, platform scrape guides
+- `sandbox/` — gcloud SDK, venv, and ADC credentials (auto-created by `activate.sh`; gitignored)
+- `outputs/` — generated audit outputs (gitignored)
 
-## What Is Safe To Share
+Gitignored: `sandbox/`, `.venv/`, `.uv-cache/`, `outputs/`, `.DS_Store`.
 
-This repository is intended to be shareable across computers, but **not every local file should be committed**.
+## First-time setup
 
-Ignored by default:
+You need `bash`, `curl`, and [`uv`](https://docs.astral.sh/uv/) on the host, plus a plantstory-BQ-capable Google account. `activate.sh` installs the gcloud SDK and Python venv into `./sandbox/`.
 
-- `.venv/`
-- `.uv-cache/`
-- `outputs/`
-- macOS metadata such as `.DS_Store`
-
-## Fresh Machine Setup
-
-Use this section when setting up a brand-new machine for the first time.
-
-### 1. Install required tools
-
-Make sure these tools are available before continuing:
-
-- `git`
-- `python3`
-- [`uv`](https://docs.astral.sh/uv/)
-- `gcloud` (Google Cloud SDK)
-
-Quick checks:
+1. Source the script. On first run it prints an OAuth URL and returns:
 
 ```bash
-git --version
-python3 --version
-uv --version
-gcloud --version
+source ./activate.sh
 ```
 
-If `gcloud` is missing, install Google Cloud SDK first. If `uv` is missing, the bootstrap script can install a project-local copy automatically.
+2. Open the URL in a browser, sign in with your plantstory Google account, and copy the verification code Google shows on the success page.
 
-### 2. Create the local Python environment
-
-This project uses `uv` with a committed lockfile.
+3. Re-source with the code:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv sync
+AUTH_CODE='4/0...' source ./activate.sh
 ```
 
-This creates a local `.venv` from `pyproject.toml` and `uv.lock`.
+ADC is now written to `sandbox/.config/gcloud/application_default_credentials.json` and persists across sessions.
 
-### 3. Authenticate BigQuery access
-
-This repository uses sandbox `gcloud` Application Default Credentials (ADC) only.
-
-1. Log into Google Cloud in the browser:
+## Every subsequent session
 
 ```bash
-gcloud auth application-default login
+source ./activate.sh
 ```
 
-2. In the browser, choose the Google account that has access to the BigQuery data.
+Idempotent. Activates the sandbox by setting `PATH`, `VIRTUAL_ENV`, `GOOGLE_APPLICATION_CREDENTIALS`, and `GOOGLE_CLOUD_PROJECT=plantstory`. Because `source` only affects the current shell, each fresh shell (including every new `Bash` tool invocation) needs to either re-source the script or chain onto it: `source ./activate.sh && python …`.
 
-3. After authorization completes, verify ADC works:
+On your local machine the venv persists at `sandbox/.venv-audit`. In the Cowork sandbox it's session-local (`/sessions/<id>/.venv-audit`) and rebuilt each session — fast because wheels come from the persistent `.uv-cache`. The first source of each Cowork session prints `[2/3] Creating venv at …` — that's expected, not an error.
+
+## Run scripts
+
+After sourcing:
+
+```bash
+# Look up a specific seller
+python skills/seller-audit/scripts/bq_query_seller.py --query "seller@example.com"
+python skills/seller-audit/scripts/bq_query_seller.py --vid 217268720946
+
+# Latest applications (default limit 3)
+python skills/seller-audit/scripts/bq_latest_applications.py --limit 20
+```
+
+Results land in `outputs/seller_<vid>.json` or `outputs/latest_applications_<n>.json`.
+
+Sanity checks:
 
 ```bash
 gcloud auth application-default print-access-token
+python -c "from google.cloud import bigquery; print(bigquery.Client().project)"
 ```
 
-4. Set the default GCP project if needed:
+## Troubleshooting
 
-```bash
-gcloud config set project plantstory
-```
-
-Notes:
-
-- `gcloud auth login` is optional for this repo. The important command for the Python BigQuery client is `gcloud auth application-default login`.
-- Successful ADC login usually writes credentials to `~/.config/gcloud/application_default_credentials.json`.
-- `./setup.sh` checks `gcloud`, validates ADC, and starts the ADC login flow automatically if credentials are missing.
-
-### 4. Verify the repo can query seller data
-
-Run a known lookup:
-
-```bash
-UV_CACHE_DIR=.uv-cache .venv/bin/python skills/seller-audit/scripts/bq_query_seller.py --query "seller@example.com"
-UV_CACHE_DIR=.uv-cache .venv/bin/python skills/seller-audit/scripts/bq_query_seller.py --vid 205494706259
-```
-
-If successful, the script will:
-
-- print `Found N record(s).` or similar output
-- write a JSON file into `outputs/`
-
-## Run Scripts
-
-Examples:
-
-```bash
-UV_CACHE_DIR=.uv-cache .venv/bin/python skills/seller-audit/scripts/bq_query_seller.py --query "seller@example.com"
-UV_CACHE_DIR=.uv-cache .venv/bin/python skills/seller-audit/scripts/bq_query_seller.py --query "succulent" --limit 10
-UV_CACHE_DIR=.uv-cache .venv/bin/python skills/seller-audit/scripts/bq_query_seller.py --vid 205494706259
-```
-
-Common checks:
-
-```bash
-gcloud auth application-default print-access-token
-UV_CACHE_DIR=.uv-cache .venv/bin/python -c "from google.cloud import bigquery; print(bigquery.Client().project)"
-```
-
-Common failure cases:
-
-- `Default credentials not found`
-  Run `gcloud auth application-default login`.
-- `403 Access Denied`
-  Your Google account is authenticated but does not have permission to query the dataset.
-- `Project was not passed and could not be determined`
-  Run `gcloud config set project plantstory` or set the correct project explicitly.
-
-## Git Hygiene
-
-Before pushing or sharing:
-
-1. Make sure no service account keys are staged.
-2. Keep generated audit outputs inside `outputs/`.
-3. Commit the workflow code, references, and lockfile.
-
-## Bootstrap Script
-
-If you want a one-command setup, use:
-
-```bash
-./setup.sh
-```
+- **`Default credentials not found`** — delete `sandbox/.config/gcloud/application_default_credentials.json` and re-run the first-time OAuth setup.
+- **`403 Access Denied`** — your Google account is authenticated but lacks BigQuery access to the plantstory dataset. Ask an admin.

@@ -67,14 +67,19 @@ fi
 export PATH="$_SANDBOX_DIR/google-cloud-sdk/bin:$PATH"
 
 # --- 2. venv ---------------------------------------------------------------
-# The venv lives under the FUSE-mounted workspace so it persists across
-# sessions. But uv creates `bin/python` as a symlink into the session's own
-# uv cache (e.g. /sessions/<session>/.local/share/uv/...), which is wiped on
-# session roll. When that happens `bin/python` is a dangling symlink and the
-# venv is unusable. The FUSE mount also refuses to delete the stale symlinks,
-# so in-place `uv venv --clear` can fail. Handle both by falling back to a
-# fresh venv in session-local space (outside the FUSE mount).
-_need_install=0
+# When running in the Cowork sandbox, the workspace is FUSE-mounted under
+# /sessions/<id>/mnt/, and uv's managed Python lives at /sessions/<id>/.local/
+# which is wiped on session roll. A venv persisted on FUSE ends up with a
+# dangling `bin/python` symlink and goes unusable. So in Cowork we put the
+# venv under /sessions/<id>/.venv-audit (session-local, outside FUSE) and
+# rebuild it each session — fast because `.uv-cache` is FUSE-persistent and
+# pip install just hardlinks wheels from it.
+#
+# On the user's local machine the regex below doesn't match, so the venv
+# stays at $_SANDBOX_DIR/.venv-audit and persists normally.
+if [[ "$_SANDBOX_DIR" =~ ^(/sessions/[^/]+)/mnt/ ]]; then
+  _VENV_DIR="${BASH_REMATCH[1]}/.venv-audit"
+fi
 
 if [[ -x "$_VENV_DIR/bin/python" ]]; then
   echo "[2/3] venv already exists"
@@ -83,38 +88,13 @@ else
     echo "uv not found. Install it:  curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
     return 1
   fi
-
-  if [[ -d "$_VENV_DIR" ]]; then
-    echo "[2/3] Existing venv at $_VENV_DIR is broken (likely a stale Python symlink from a previous session)."
-    # Try in-place recreation first; --clear will fail on a FUSE mount that
-    # refuses to delete the stale symlinks.
-    if UV_CACHE_DIR="$_UV_CACHE" uv venv --python 3.12 --clear "$_VENV_DIR" 2>/dev/null; then
-      _need_install=1
-    elif [[ "$_SANDBOX_DIR" =~ ^(/sessions/[^/]+)/mnt/ ]]; then
-      _VENV_DIR="${BASH_REMATCH[1]}/.venv-audit"
-      echo "      -> in-place recreation blocked (FUSE). Using session-local venv at $_VENV_DIR"
-      if [[ ! -x "$_VENV_DIR/bin/python" ]]; then
-        UV_CACHE_DIR="$_UV_CACHE" uv venv --python 3.12 "$_VENV_DIR" \
-          || { echo "uv venv (session-local fallback) failed" >&2; return 1; }
-        _need_install=1
-      fi
-    else
-      echo "uv venv --clear failed and no session-local fallback is available" >&2
-      return 1
-    fi
-  else
-    echo "[2/3] Creating venv at $_VENV_DIR..."
-    UV_CACHE_DIR="$_UV_CACHE" uv venv --python 3.12 "$_VENV_DIR" \
-      || { echo "uv venv failed" >&2; return 1; }
-    _need_install=1
-  fi
-
-  if (( _need_install )); then
-    echo "      -> installing google-cloud-bigquery, pyyaml..."
-    UV_CACHE_DIR="$_UV_CACHE" VIRTUAL_ENV="$_VENV_DIR" \
-      uv pip install --quiet google-cloud-bigquery pyyaml \
-      || { echo "uv pip install failed" >&2; return 1; }
-  fi
+  echo "[2/3] Creating venv at $_VENV_DIR..."
+  UV_CACHE_DIR="$_UV_CACHE" uv venv --python 3.12 "$_VENV_DIR" \
+    || { echo "uv venv failed" >&2; return 1; }
+  echo "      -> installing google-cloud-bigquery, pyyaml..."
+  UV_CACHE_DIR="$_UV_CACHE" VIRTUAL_ENV="$_VENV_DIR" \
+    uv pip install --quiet google-cloud-bigquery pyyaml \
+    || { echo "uv pip install failed" >&2; return 1; }
 fi
 
 # --- 3. ADC ----------------------------------------------------------------
@@ -125,6 +105,23 @@ _PKCE_FILE="$_SANDBOX_DIR/pkce.json"
 
 if [[ -f "$_ADC_FILE" ]]; then
   echo "[3/3] ADC already present"
+  # Backfill quota_project_id on ADC files written by older versions of this
+  # script so the google.auth "without a quota project" warning goes away
+  # without requiring users to re-run OAuth.
+  python3 - "$_ADC_FILE" <<'PYEOF' || true
+import json, sys
+adc_path = sys.argv[1]
+try:
+    with open(adc_path) as f:
+        adc = json.load(f)
+except Exception:
+    sys.exit(0)
+if adc.get("type") == "authorized_user" and "quota_project_id" not in adc:
+    adc["quota_project_id"] = "plantstory"
+    with open(adc_path, "w") as f:
+        json.dump(adc, f, indent=2)
+    print("      -> backfilled quota_project_id=plantstory")
+PYEOF
 elif [[ -n "${AUTH_CODE:-}" ]]; then
   echo "[3/3] Exchanging auth code for refresh token..."
   if [[ ! -f "$_PKCE_FILE" ]]; then
@@ -164,6 +161,11 @@ with open(adc_path, "w") as f:
         "client_secret": pkce["client_secret"],
         "refresh_token": resp["refresh_token"],
         "type": "authorized_user",
+        # Attach quota/billing to plantstory so google.auth doesn't warn on
+        # every BigQuery call. Matches what `gcloud auth application-default
+        # login` writes; we write it ourselves because the inlined PKCE flow
+        # doesn't go through gcloud.
+        "quota_project_id": "plantstory",
     }, f, indent=2)
 # Best-effort cleanup; FUSE mounts sometimes refuse deletes. ADC is already
 # written at this point, so a failure here shouldn't abort the flow.

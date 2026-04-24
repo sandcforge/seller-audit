@@ -12,7 +12,7 @@ This skill coordinates the end-to-end seller audit pipeline. It dispatches work 
 Before running any script in this skill (extract, BQ queries, etc.), source the sandbox so `python`, `gcloud`, ADC, and project env vars are in place. This is idempotent — safe to run at the start of every session.
 
 ```bash
-cd <repo-root> && source sandbox/activate.sh
+cd <repo-root> && source ./activate.sh
 ```
 
 `source` only affects the shell that runs it, so each `Bash` tool call needs to either re-source it or chain the work onto the same command with `&&`. After activation, scripts run with no extra flags (e.g. `python skills/seller-audit/scripts/bq_latest_applications.py --limit 1`). See the project `CLAUDE.md` for details on how `activate.sh` recovers from stale venvs across session resets.
@@ -146,7 +146,8 @@ All shared reference files live in `references/` within this skill. Component sk
 - `scrape-ebay.md` (3%) · `scrape-mercari.md` (1.6%) · `scrape-collx.md` (<1%)
 
 ### Cross-Cutting Protocols
-- `protocols/china.md` — China Connection risk signals
-- `protocols/category-mismatch.md` — Category mismatch handling
-- `protocols/name-ambiguity.md` — Name disambiguation (Gold/Silver/Bronze)
-- `protocols/tool-failure.md` — Recovery from 404s, login walls, tool errors
+- `edge-cases.md` — single reference containing all four protocols:
+  - `#china-connection` — China Connection risk signals
+  - `#category-mismatch` — Category mismatch handling
+  - `#name-ambiguity` — Name disambiguation (Gold/Silver/Bronze)
+  - `#tool-failure-recovery` — Recovery from 404s, login walls, tool errors

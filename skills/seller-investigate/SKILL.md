@@ -77,11 +77,11 @@ Based on the seller's category, read Part A (Investigation Data Points) of the r
 
 ## Cross-Cutting Protocols
 
-Load these as needed during investigation:
-- China Connection signals → `../seller-audit/references/protocols/china.md`
-- Category mismatch detected → `../seller-audit/references/protocols/category-mismatch.md`
-- Name ambiguity in search results → `../seller-audit/references/protocols/name-ambiguity.md`
-- Tool failures (404, login wall, etc.) → `../seller-audit/references/protocols/tool-failure.md`
+All four protocols live in a single reference — load the section that applies:
+- China Connection signals → `../seller-audit/references/edge-cases.md#china-connection`
+- Category mismatch detected → `../seller-audit/references/edge-cases.md#category-mismatch`
+- Name ambiguity in search results → `../seller-audit/references/edge-cases.md#name-ambiguity`
+- Tool failures (404, login wall, etc.) → `../seller-audit/references/edge-cases.md#tool-failure-recovery`
 
 ## Chrome Tab Management
 
