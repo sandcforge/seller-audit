@@ -49,10 +49,10 @@ platforms:                        # Array of platform investigation results
     raw_metrics_text: string or null  # Original text from page extraction (e.g., "1.5K Followers · 1.2K Sold") — sanity check anchor for Verdict Agent
 
 investigation_summary:
-  total_platforms_checked: integer
-  total_platforms_active: integer
-  total_followers: integer        # Sum across ALL active platforms
-  total_items_sold: integer or null  # Sum if available
+  total_platforms_checked: integer    # Count of platforms ACTUALLY VISITED (any status: active/404/login_blocked/private). Does NOT include negative websearch results where no profile was found. Must equal len(platforms[]).
+  total_platforms_active: integer     # Count of platforms[] entries with status == "active"
+  total_followers: integer or null    # Sum across ALL active platforms. Null if every active platform has metrics.followers == null. A single non-null value is summed with 0 for nulls; but if ALL are null, emit null (not 0) — "0 followers" is a negative signal and must not be synthesized from missing data.
+  total_items_sold: integer or null   # Same null-propagation rule as total_followers.
   highest_rating: float or null
   risk_flags: [string]            # Aggregated risk signals across all platforms
   china_connection_signals: [string]  # From China Connection Protocol, or empty
@@ -71,7 +71,8 @@ investigation_summary:
 4. **One entry per platform visited.** If a platform returned 404, still include it with `status: "404"` and null metrics.
 5. **`categories_observed` must reflect ACTUAL content**, not the seller's claimed category. This is what Verdict Agent uses to detect mismatches.
 6. **`risk_flags` is the critical field** for Verdict Agent. Be explicit: "chinese_text_in_listing_photos", "fake_reviews_suspected", "all_stock_photos" — not just "HIGH RISK".
-7. **`total_followers` in investigation_summary** = sum across all active platforms. Verdict Agent uses this for tier classification, not individual platform counts.
+7. **`total_followers` in investigation_summary** = sum across all active platforms. Verdict Agent uses this for tier classification, not individual platform counts. **Null-propagation:** if EVERY active platform has `metrics.followers == null`, emit `null` here — do NOT emit `0`. "0 followers" is a real negative signal and must never be synthesized from missing data. Same rule applies to `total_items_sold`.
+7a. **`total_platforms_checked`** counts platforms that were actually visited (entries in `platforms[]`), regardless of status. Websearch queries that returned zero results and produced no `platforms[]` entry do NOT count. If you searched Instagram/TikTok/Etsy and found nothing, that's 0 additional checks, not 3 — reflect that in the investigation narrative, not in this number.
 8. **`raw_metrics_text`** must contain the original text string from which metrics were parsed. This lets the Verdict Agent sanity-check parsed numbers (e.g., verify "1.5K" was correctly converted to 1500, not 15000).
 9. **`sop_applied`** must name the SOP file actually used. If a category mismatch caused an SOP switch, this reflects the switched-to SOP.
 10. **`audit_timestamp`** must be set to the current UTC time when the investigation completes.

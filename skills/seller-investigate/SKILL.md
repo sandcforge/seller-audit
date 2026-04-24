@@ -97,6 +97,14 @@ Output YAML following the exact schema in:
 
 Every field must be present. Use `null` for unknown values, `[]` for empty arrays. Metrics must be integers/floats (convert "1.5K" → 1500). Include `raw_metrics_text` for each platform as a sanity-check anchor. Set `audit_timestamp` to current UTC time and `sop_applied` to the SOP file used.
 
+**Narrative must match the YAML.** Anything you describe in your summary/reply must be reflected in the structured fields, and vice versa. Common divergences to avoid:
+
+- Claiming "searched 4 platforms" in prose while `total_platforms_checked` is 2 — `total_platforms_checked` counts entries in `platforms[]` (i.e., platforms actually visited), not platforms you merely ran a websearch for and found nothing. If you want to document negative websearches, put them in the narrative AND keep `total_platforms_checked` honest.
+- Summing `null` followers as `0` in `total_followers` — if every active platform has `metrics.followers == null`, emit `null`, not `0`. "0 followers" is a negative signal the Verdict Agent will act on.
+- Describing signals in prose that aren't anchored in `platforms[].risks`, `categories_observed`, `badges`, etc. If you saw it, capture it in a field.
+
+Before emitting the YAML, re-read your own summary and confirm every number and claim maps to a field.
+
 ## Visual Forensics
 
 When screenshots show product/content images, assess:

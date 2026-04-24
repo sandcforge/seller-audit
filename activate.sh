@@ -235,5 +235,43 @@ source "$_VENV_DIR/bin/activate"
 echo ""
 echo "sandbox ready — gcloud=$(command -v gcloud) venv=$VIRTUAL_ENV adc=$GOOGLE_APPLICATION_CREDENTIALS"
 
+# --- 4. smoke tests --------------------------------------------------------
+# Two quick checks so a broken sandbox fails loudly here instead of inside the
+# first script that tries to use it. Non-fatal by design: print PASS/FAIL and
+# keep going — the caller can still inspect $VIRTUAL_ENV etc. even if BQ is
+# temporarily unreachable.
+
+# 4a. gcloud ADC login check: prints the active account that ADC resolves to.
+#     Failure modes this catches: expired refresh token, missing ADC file,
+#     wrong quota project.
+echo "[4/5] gcloud ADC check..."
+if _ADC_ACCOUNT="$(gcloud auth application-default print-access-token >/dev/null 2>&1 \
+  && gcloud auth list --filter=status:ACTIVE --format='value(account)' 2>/dev/null | head -1)"; then
+  if [[ -n "$_ADC_ACCOUNT" ]]; then
+    echo "      -> PASS (active account: $_ADC_ACCOUNT)"
+  else
+    echo "      -> PASS (ADC token minted; no gcloud-user account — ADC-only mode)"
+  fi
+else
+  echo "      -> FAIL: ADC token mint failed. Re-run OAuth:  rm $GOOGLE_APPLICATION_CREDENTIALS && source ${BASH_SOURCE[0]}" >&2
+fi
+unset _ADC_ACCOUNT
+
+# 4b. BigQuery SDK check: run a trivial `SELECT 1` via the python client to
+#     prove the venv has google-cloud-bigquery installed AND that ADC actually
+#     works against the plantstory project.
+echo "[5/5] BigQuery SDK check..."
+if python - <<'PYEOF' 2>/dev/null
+from google.cloud import bigquery
+client = bigquery.Client()
+row = next(iter(client.query("SELECT 1 AS ok").result()))
+assert row.ok == 1
+PYEOF
+then
+  echo "      -> PASS (SELECT 1 round-tripped via google-cloud-bigquery)"
+else
+  echo "      -> FAIL: BigQuery SDK query failed. Check venv ($VIRTUAL_ENV) and ADC ($GOOGLE_APPLICATION_CREDENTIALS)." >&2
+fi
+
 # Tidy internal vars
 unset _SANDBOX_DIR _ROOT_DIR _GCLOUD_BIN _VENV_DIR _ADC_FILE _PKCE_FILE _UV_CACHE _TARBALL _need_install

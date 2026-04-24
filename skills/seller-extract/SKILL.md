@@ -13,21 +13,49 @@ This skill is invoked by the seller-audit orchestrator (or manually) when you ne
 
 ## Method 1: BigQuery Script (Default)
 
-Run the bundled script to query `plantstory.hubspot.Contact`:
+Run the bundled scripts to query `plantstory.hubspot.Contact`. Both scripts use
+sandbox `gcloud` Application Default Credentials and write JSON output to the
+project-level `outputs/` folder.
+
+**Prerequisite:** the shell must have `./activate.sh` sourced first — see the
+project `CLAUDE.md` for the sandbox activation rule.
+
+### Single-seller lookup — `bq_query_seller.py`
 
 ```bash
-python skills/seller-audit/scripts/bq_query_seller.py --query "<email/name/phone/username>"
-python skills/seller-audit/scripts/bq_query_seller.py --vid <vid>
+# Search by email, name, phone, or PalmStreet username
+python skills/seller-audit/scripts/bq_query_seller.py --query "seller@example.com"
+python skills/seller-audit/scripts/bq_query_seller.py --query "Firstname Lastname"
+
+# Full whitelisted row by HubSpot VId
+python skills/seller-audit/scripts/bq_query_seller.py --vid 217268720946
 ```
 
-The script uses sandbox `gcloud` Application Default Credentials and writes output to `outputs/`.
+The script accepts `--query` and `--vid` only. Do **not** pass `--email` or
+`--userid` — those flags don't exist and will error out.
+
+- `--query` → list of matching VIds + summary fields, printed to stdout.
+- `--vid` → full whitelisted row written to `outputs/seller_<vid>.json`, key fields printed.
+
+### Latest applications — `bq_latest_applications.py`
+
+```bash
+python skills/seller-audit/scripts/bq_latest_applications.py --limit 20
+```
+
+Default `--limit` is 3. Output is written to `outputs/latest_applications_<n>.json`.
+
+### Field mapping
+
+For the BQ-column → audit-field mapping and the `FIELDS` whitelist rationale, read:
+> `../seller-audit/references/extract-hubspot.md`
 
 ### When to fall back
 
 Switch to Method 2 if:
 - `No results found` for a known email/vid/userid
-- Script auth error (e.g., ADC missing or expired)
-- Data looks stale (BQ sync runs on a delay)
+- Script auth error (e.g., ADC missing or expired) that can't be fixed quickly
+- Data in BQ looks stale (BQ sync runs on a delay — if HubSpot was updated in the last few hours, the UI may be fresher)
 
 ## Method 2: Chrome on HubSpot UI (Fallback)
 

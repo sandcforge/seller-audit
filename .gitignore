@@ -19,3 +19,4 @@ skills/seller-extract/assets/bq-reader-key.json
 # Generated outputs and audit artifacts
 outputs/*
 !outputs/.gitkeep
+sandbox/

@@ -208,7 +208,9 @@ def render_verdict_section(assessment: Dict[str, Any], handoff: Dict[str, Any]) 
     risk = assessment.get('risk', 'HIGH')
     category = assessment.get('category_used', 'general')
 
-    output = f'**Step N — Verdict: Apply {category.title()} SOP**\n\n'
+    # Verdict step is numbered immediately after the last investigation step.
+    verdict_step_num = len(assessment.get('investigation_steps', [])) + 1
+    output = f'**Step {verdict_step_num} — Verdict: Apply {category.title()} SOP**\n\n'
 
     output += f'- **Tier:** {tier}\n'
     output += f'- **Risk:** {risk}\n'
@@ -263,8 +265,19 @@ def render_report(input_data: Dict[str, Any]) -> str:
 
     # Summary paragraph
     investigation_steps = assessment.get('investigation_steps', [])
-    active_platforms = len([s for s in investigation_steps if s.get('status') == 'active'])
-    platforms_checked = len(investigation_steps)
+    # Platform counts come from the handoff YAML's investigation_summary, NOT from
+    # len(investigation_steps). investigation_steps may include analysis/credibility
+    # steps that aren't platform visits, which would inflate the count.
+    inv_summary = handoff.get('investigation_summary', {}) if isinstance(handoff, dict) else {}
+    platforms_checked = inv_summary.get('total_platforms_checked')
+    active_platforms = inv_summary.get('total_platforms_active')
+    if platforms_checked is None or active_platforms is None:
+        # Fall back to platforms[] length if summary is missing.
+        platforms_list = handoff.get('platforms', []) if isinstance(handoff, dict) else []
+        platforms_checked = platforms_checked if platforms_checked is not None else len(platforms_list)
+        active_platforms = active_platforms if active_platforms is not None else sum(
+            1 for p in platforms_list if p.get('status') == 'active'
+        )
 
     summary = f'Audited {platforms_checked} platform{"s" if platforms_checked != 1 else ""} with {active_platforms} active. '
     summary += f'Verdict: **{verdict}**. '

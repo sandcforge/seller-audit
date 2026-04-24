@@ -92,6 +92,9 @@ If the handoff YAML shows `sales_stage: Approved` or `Rejected` in the seller da
 3. **Category mismatch:** Use the ACTUAL category's SOP, not the claimed one. Flag this in the report.
 4. **Collectibles:** NEVER reject outright. Downgrade all would-be REJECTs to REVIEW.
 5. **raw_metrics_text sanity check:** Before finalizing tier, spot-check a few `raw_metrics_text` entries against their parsed metric values. If "1.5K" was parsed as 15000, fix it.
+6. **No hallucinated numbers.** Every quantitative claim in the report ("Audited N platforms", "M followers", "K items sold", etc.) must trace back to a specific field in the handoff YAML. Do NOT recompute counts from the investigator's prose narrative or `early_exit_reason`. In particular: "Audited N platforms with M active" must use `investigation_summary.total_platforms_checked` and `total_platforms_active` verbatim — nothing else. If those fields contradict the narrative, trust the fields and note the discrepancy in Special Notes.
+7. **Null is not zero.** If `total_followers` or `total_items_sold` is `null`, report it as "not observed" or omit the claim — do not render as "0 followers" or "0 sales", which implies a negative signal that wasn't actually measured.
+8. **Replace template placeholders.** The output-format template uses `Step N` as a literal placeholder for the final verdict step. Replace it with the actual step number (e.g., `Step 5`) based on how many investigation steps you rendered. A report containing the literal string `Step N` is a rendering bug.
 
 ## Decision Shortcuts
 

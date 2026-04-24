@@ -42,8 +42,8 @@ The report has exactly **3 blocks**: Header Table → Summary → Investigation 
 
 [...repeat for each action taken...]
 
-**Step N — Verdict: Apply [Category] SOP**
-[This is ALWAYS the final step. Show the verdict derivation:]
+**Step {last_step_number + 1} — Verdict: Apply [Category] SOP**
+[This is ALWAYS the final step — number it as (count of investigation steps) + 1, e.g. "Step 5" if there were 4 investigation steps. Do NOT leave the literal string `Step N` in the rendered report. Show the verdict derivation:]
 - Category: Applied as [X] → actual [Y]. [Mismatch or no mismatch.]
 - Tier: [Key metrics] → **Tier [S/A/B/F]**.
 - Risk: **[LOW/MEDIUM/HIGH]** — [Primary reason].
