@@ -56,6 +56,8 @@ Output: structured YAML per ../seller-audit/references/handoff-schema.md
 """)
 ```
 
+**Prompt discipline:** Do NOT add tool-usage instructions, fallback permissions, or workarounds to this prompt. `seller-investigate` owns its own tool discipline (including the mandatory Chrome rule). Language like "if Chrome is unavailable, use web_fetch as fallback" makes subagents skip Chrome by default and produces invalid audits. If the subagent reports a tool problem, verify it yourself before accepting — do not pre-authorize fallbacks.
+
 The subagent will:
 - Normalize and verify URLs (via scripts)
 - Visit all provided URLs in Chrome

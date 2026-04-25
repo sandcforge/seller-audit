@@ -16,8 +16,7 @@ Before entering the loop, prepare:
 action_queue:                   # Ordered by priority (highest first)
   1. visit_provided_urls        # MANDATORY — must complete before any early exit
   2. follow_secondary_links     # Links found in bios / about pages / linktrees
-  3. google_search_fallback     # ONLY when ALL provided URLs are invalid: Google Search in Chrome
-  4. web_search_corroboration   # Supplementary search queries (WebSearch tool, not Chrome)
+  3. google_search_fallback     # Google Search in Chrome to expand platform coverage
 
 evidence:
   platforms_visited: []         # Platform result entries (per Section 2.5.5)
@@ -31,6 +30,8 @@ evidence:
 iteration: 0
 max_iterations: 5
 ```
+
+**Platform coverage target:** P1 + P2 + P3 together should yield roughly **3–5 platforms** worth of evidence. This is a target, not a quota — see Section 2.5.3 Priority 3 for how to handle the case where P1+P2 only produce 1–2 platforms.
 
 ### 2.5.2 REASON Phase — Evaluate Evidence After Each Action
 
@@ -95,11 +96,11 @@ After visiting all provided URLs, set `provided_urls_done = true`.
 
 Visit links discovered in bios, about sections, and linktrees during Priority 1. These are high-confidence connections (e.g., Linktree → Etsy, Instagram bio → Shopify). Only follow links that appear to be storefronts or business pages.
 
-**Priority 3: Google Search Fallback (in Chrome)**
+**Priority 3: Google Search in Chrome (platform coverage expansion)**
 
-> **Trigger condition:** This priority ONLY activates when ALL provided URLs from Priority 1 are invalid (404, dead, or completely empty accounts with 0 content). If ANY provided URL yielded a live, active page, skip this priority.
+> **When to run:** Use P3 whenever P1 + P2 haven't yet produced enough platforms to reach the 3–5 target — even if P1 produced live pages. P3 is a regular tool for expanding platform coverage, not a last-resort fallback. Skip P3 only when P1 + P2 have already delivered 3+ platforms with coherent signal.
 
-When all provided URLs are dead, use **Google Search in Chrome** (navigate to `google.com` and search) to look for the seller's online presence. Do NOT construct platform URLs directly — let Google find them.
+Use **Google Search in Chrome** (navigate to `google.com` and search) to discover additional platforms the seller operates on. Do NOT construct platform URLs directly — let Google find them.
 
 **Search queries to run (in order, stop when you find relevant results):**
 1. `"{PalmStreet Username}" {Category}` (e.g., `"KaosCollection" fashion`)
@@ -130,19 +131,14 @@ When in doubt, do NOT assume a Google result belongs to the seller. It is better
 - Do NOT construct platform URLs (e.g., do not manually build `instagram.com/{username}` or `poshmark.com/closet/{username}`) — only follow links that Google returns
 - ALL pages discovered via Google Search MUST be tagged with `Attribution: "Found via Google Search"` in the report (Section 2.5.5 and Section 3.3 Part 2), and include an identity match assessment (Strong / Weak / No match)
 
-**After completing Google Search fallback**, set `all_provided_urls_invalid = true` and return to REASON phase.
+**After completing P3**, if all provided P1 URLs were invalid and P3 also found nothing, set `all_provided_urls_invalid = true`. Return to REASON phase.
 
-**Priority 4: WebSearch Corroboration**
+**Coverage expectation across P1 + P2 + P3:**
 
-Only attempt if Priorities 1–3 have not established sufficient signal. Use the WebSearch tool (not Chrome) to find additional assets:
-- `"{Name}" {Category} {Platform}` (e.g., `"Noah Stakes" orchids Etsy`)
-- `"{Username}" {Category}`
-- `"{Email}"` (if other searches fail)
-
-Rules:
-- Maximum 3 search queries total
-- If 3 search attempts yield no new valid pages, STOP
-- Compare Category, Owner Name, and Business Scale for relevance before investigating a result
+Aim for **3–5 platforms** total. But this is a target, not a quota:
+- If P1 + P2 already yield 3+ platforms with coherent signal, skip P3 — you're done.
+- Otherwise run P3 to try to reach 3–5 platforms, regardless of whether P1 URLs were live or dead.
+- **Do not force coverage.** If P3 finds no results that meet the strong-identity-match bar (see identity verification above), stop at whatever P1 + P2 produced — even if that's only 1–2 platforms. Better to hand off a smaller honest dataset than to pad with weak/unconfirmed matches.
 
 **After acting → return to REASON phase.**
 
@@ -150,7 +146,7 @@ Rules:
 
 1. **Priority 1 is a gate** — The loop MUST NOT exit before all provided URLs have been visited, even if early signals look strong.
 2. **Dead Short Links — try URL normalization first** — When a provided short link 404s, apply URL normalization rules (e.g., Whatnot `/invite/` → `/user/`, expand eBay short links by visiting in Chrome). This is part of Priority 1 URL processing, NOT a separate platform construction step.
-3. **All provided URLs dead → must run Google Search fallback** — The loop MUST NOT exit with a REJECT verdict before completing Priority 3 (Google Search in Chrome). Only after Google Search also yields nothing can you conclude zero footprint.
+3. **All provided URLs dead → must run Google Search** — The loop MUST NOT exit with a REJECT verdict before completing Priority 3 (Google Search in Chrome). Only after Google Search also yields nothing can you conclude zero footprint.
 4. **Max 5 iterations is a hard cap** — At iteration 5, exit with whatever evidence is available. If ambiguous, default verdict to REVIEW.
 5. **Record the exit** — When exiting the loop, record `investigation_iterations` (how many iterations ran) and `early_exit_reason` (why the loop ended, or `null` if max iterations reached).
 
@@ -179,7 +175,7 @@ For each page visited (regardless of which action triggered it), capture:
 
 ```
 **[Platform] — [full https:// URL]**
-- Attribution: [How found: "Provided by seller" / "Found via Google Search" / "Found via WebSearch" / "Found in Instagram bio"]
+- Attribution: [How found: "Provided by seller" / "Found via Google Search" / "Found in Instagram bio"]
 - Identity Match: [ONLY for Google Search results — "Strong match (name + location)" / "Weak match (username only)" / "Unconfirmed". Omit this line for seller-provided URLs.]
 - Key Metrics: [Followers, Sales, Reviews, etc.]
 - Summary: [What was found]

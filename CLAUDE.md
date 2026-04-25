@@ -15,3 +15,5 @@ It's idempotent — run it at the start of every session. It sets up `python`, `
 ## Seller audits
 
 When the user asks to audit, review, verify, or investigate a seller — or drops a HubSpot contact link / seller name and wants an assessment — invoke the `seller-audit` skill. It orchestrates extraction, investigation, and verdict. Don't try to do the audit steps manually.
+
+Write one verdict `.md` file per seller. For N sellers, produce N separate files — never bundle multiple sellers into one combined report.

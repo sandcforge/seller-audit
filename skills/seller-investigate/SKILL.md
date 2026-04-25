@@ -7,6 +7,15 @@ description: "Investigate a seller's online footprint by visiting their URLs in 
 
 Investigate a seller's online presence and produce structured YAML data for the Verdict Agent.
 
+## Non-Negotiable: Chrome Only
+
+All URL visits MUST go through `mcp__Claude_in_Chrome__*` tools. No exceptions.
+
+- Do NOT use curl, WebFetch, Googlebot user-agent, or any non-Chrome fetch method. OG metadata alone (title, description, coarse like-count) is insufficient evidence — it misses posts, post cadence, product photos, real follower counts, engagement, and live-selling activity. An audit built on OG metadata is not a valid audit.
+- If Chrome tool schemas aren't loaded in your environment, use ToolSearch (e.g. `select:mcp__Claude_in_Chrome__navigate,mcp__Claude_in_Chrome__get_page_text,mcp__Claude_in_Chrome__tabs_create_mcp`) to load them before concluding Chrome is unavailable.
+- If Chrome is genuinely unavailable (user disabled it, tools missing from the deferred list even after ToolSearch), STOP and report back to the caller. Do not complete the investigation with fallbacks.
+- Login walls are NOT a reason to abandon Chrome. Follow the login-wall protocol in `../seller-audit/references/scrape-{platform}.md` (typically: `get_page_text` → screenshot → try marketplace/profile URL variant). Stay in Chrome.
+
 ## Role Boundaries
 
 - **DO:** Visit URLs in Chrome, extract metrics, follow bio links, run Google Search fallback, detect risks
@@ -45,11 +54,12 @@ Read the full ReAct loop specification:
 > `../seller-audit/references/loop-react.md`
 
 Summary of the loop:
-1. **Initialize** action queue (P1: visit provided URLs → P2: follow secondary links → P3: Google Search fallback → P4: WebSearch corroboration)
+1. **Initialize** action queue (P1: visit provided URLs → P2: follow secondary links → P3: Google Search in Chrome to expand platform coverage)
 2. **ACT:** Pick highest-priority incomplete action, visit in Chrome, extract per-page data
 3. **REASON:** After each action, evaluate if evidence is sufficient (STRONG_APPROVE, STRONG_REJECT, NEED_REVIEW)
 4. **Gate:** Cannot exit before all provided URLs are visited (P1 complete)
-5. **Max 5 iterations**
+5. **Coverage target:** P1 + P2 + P3 together should yield roughly 3–5 platforms. P3 runs whenever P1+P2 haven't hit the target — it is NOT gated on P1 URLs being dead. If P3 finds no strong-identity matches, stop at whatever P1+P2 produced (even 1–2 platforms) rather than attributing weak matches.
+6. **Max 5 iterations**
 
 ## Loading Platform Scraping Guides
 
