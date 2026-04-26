@@ -71,14 +71,25 @@ def extract_identifier(url: str) -> str:
 
     domain = canonical_domain(parsed.netloc)
     path = parsed.path.strip('/')
-    # Preserve existing behavior: empty path returns '' even for etsy
-    # subdomains — the verify flow never hit that case before and changing
-    # it here would perturb baseline JSON output.
+    platform = detect_platform(domain)
+
+    # Etsy subdomain stores the identifier in the domain itself
+    # (e.g. granitestatecoins.etsy.com), so it's valid even when the path
+    # is empty. Handle this BEFORE the empty-path early return so callers
+    # like normalize_urls.py (which compute expected_identifier off the
+    # normalized URL) get the right answer.
+    if (
+        platform == 'etsy'
+        and domain.endswith('.etsy.com')
+        and domain != 'etsy.com'
+        and not path
+    ):
+        return domain.split('.')[0]
+
     if not path:
         return ''
 
     parts = [p for p in path.split('/') if p]
-    platform = detect_platform(domain)
 
     if platform == 'instagram':
         return parts[0] if parts else ''

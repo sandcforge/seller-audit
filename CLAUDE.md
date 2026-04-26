@@ -16,4 +16,6 @@ It's idempotent — run it at the start of every session. It sets up `python`, `
 
 When the user asks to audit, review, verify, or investigate a seller — or drops a HubSpot contact link / seller name and wants an assessment — invoke the `seller-audit` skill. It orchestrates extraction, investigation, and verdict. Don't try to do the audit steps manually.
 
-Write one verdict `.md` file per seller. For N sellers, produce N separate files — never bundle multiple sellers into one combined report.
+**The skill takes a PalmStreet uid (`palmstreet_userid`) as its input.** If the user gave you anything else — email, name, username, phone, HubSpot contact link, HubSpot VId — first run `python scripts/bq_seller.py --query "<term>"` to resolve it. Column 1 of stdout is the uid; pipe that into the seller-audit skill. `bq_seller.py` is a standalone lookup tool, not part of any skill.
+
+The skill handles **one seller per invocation**. If the user asks to audit multiple sellers, invoke the skill once per seller and produce one verdict `.md` file each — never bundle multiple sellers into one combined report.

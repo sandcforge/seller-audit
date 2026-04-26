@@ -63,13 +63,27 @@ def compare_identifiers(orig_id: str, visited_id: str) -> Tuple[bool, List[int],
     return False, diff_positions, summary
 
 
-def verify_url_pair(original: str, visited: str) -> Dict[str, Any]:
+def verify_url_pair(
+    original: str,
+    visited: str,
+    expected_identifier: str = None,
+) -> Dict[str, Any]:
     """
     Verify integrity between original and visited URLs.
 
+    If `expected_identifier` is provided (e.g., piped from normalize_urls.py),
+    use it as the authoritative identifier instead of re-extracting from
+    `original`. This is the preferred path: normalization already resolved
+    the canonical identifier (e.g., whatnot /invite/ → /user/, etsy
+    subdomain → shop name) and re-running extract_identifier on the raw
+    original would either give the same answer or a worse one.
+
     Returns verification result with detailed comparison.
     """
-    orig_id = extract_identifier(original)
+    if expected_identifier is not None and expected_identifier != '':
+        orig_id = expected_identifier
+    else:
+        orig_id = extract_identifier(original)
     visited_id = extract_identifier(visited)
 
     match, diff_positions, diff_summary = compare_identifiers(orig_id, visited_id)
@@ -111,7 +125,23 @@ def main():
         results = []
         for item in data:
             if isinstance(item, dict):
-                result = verify_url_pair(item.get('original', ''), item.get('visited', ''))
+                # Skip junk entries piped straight from normalize_urls.py —
+                # they were never visited, so there's nothing to verify.
+                if item.get('is_junk'):
+                    continue
+                # Find the visited URL. Accept either 'visited' (the natural
+                # name) or 'visited_url' (some callers may already use that
+                # key). If neither is present, skip silently — the entry is
+                # still pre-visit.
+                visited = item.get('visited') or item.get('visited_url')
+                if not visited:
+                    continue
+                # Original URL: prefer 'original'; fall back to 'normalized'
+                # so a normalize_urls.py result piped through directly still
+                # works without renaming.
+                original = item.get('original') or item.get('normalized') or ''
+                expected = item.get('expected_identifier')
+                result = verify_url_pair(original, visited, expected_identifier=expected)
                 results.append(result)
 
         print(json.dumps(results, indent=2))

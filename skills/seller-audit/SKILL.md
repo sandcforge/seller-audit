@@ -1,11 +1,13 @@
 ---
 name: seller-audit
-description: "End-to-end PalmStreet seller audit: extract applicant data from HubSpot, investigate their online footprint, and issue a final verdict. Use this skill whenever you need to audit, review, verify, or investigate a seller for PalmStreet. Triggers on: seller audit, review this seller, check this applicant, verify seller, investigate seller, seller due diligence, HubSpot seller review, audit this contact. Also trigger when the user provides a HubSpot contact URL or seller name and wants an assessment. This skill orchestrates three component skills (seller-extract, seller-investigate, seller-verdict) to produce a final APPROVE/REJECT/REVIEW decision."
+description: "End-to-end PalmStreet seller audit for a SINGLE seller, given a PalmStreet uid (`palmstreet_userid`): extract applicant data from HubSpot, investigate their online footprint, and issue a final verdict. Use this skill whenever you need to audit, review, verify, or investigate ONE seller for PalmStreet. Triggers on: seller audit, review this seller, check this applicant, verify seller, investigate seller, seller due diligence, HubSpot seller review, audit this contact. Input is always a PalmStreet uid — if the user provides anything else (email, name, contact link, HubSpot VId), resolve it first via the standalone `scripts/bq_seller.py --query <term>` lookup tool documented in CLAUDE.md, THEN invoke this skill with the resulting uid. This skill orchestrates three component skills (seller-extract, seller-investigate, seller-verdict) to produce a final APPROVE/REJECT/REVIEW decision. Scope is one seller per invocation — for multiple sellers, invoke this skill once per seller."
 ---
 
-# PalmStreet Seller Audit — Orchestrator
+# PalmStreet Seller Audit — Single-Seller Orchestrator
 
-This skill coordinates the end-to-end seller audit pipeline. It dispatches work to three component skills and assembles the final result.
+This skill coordinates the end-to-end audit pipeline for **one seller per invocation**, starting from a known `palmstreet_userid`. It dispatches work to three component skills and assembles the final result. Multi-seller workflows are out of scope — invoke this skill once per seller.
+
+**Input contract:** the skill expects a PalmStreet uid. If the user gave anything else (email, name, contact link, HubSpot VId), the caller is responsible for resolving it first — see `scripts/bq_seller.py --query <term>` (project-root standalone tool, NOT a skill component) and the wiring note in CLAUDE.md.
 
 ## Prerequisite: Activate the sandbox first
 
@@ -15,7 +17,7 @@ Before running any script in this skill (extract, BQ queries, etc.), source the 
 cd <repo-root> && source ./activate.sh
 ```
 
-`source` only affects the shell that runs it, so each `Bash` tool call needs to either re-source it or chain the work onto the same command with `&&`. After activation, scripts run with no extra flags (e.g. `python skills/seller-audit/scripts/bq_latest_applications.py --limit 1`). See the project `CLAUDE.md` for details on how `activate.sh` recovers from stale venvs across session resets.
+`source` only affects the shell that runs it, so each `Bash` tool call needs to either re-source it or chain the work onto the same command with `&&`. After activation, scripts run with no extra flags (e.g. `python skills/seller-audit/scripts/bq_query_seller.py --uid <uid>`). See the project `CLAUDE.md` for details on how `activate.sh` recovers from stale venvs across session resets.
 
 ## Pipeline Overview
 
@@ -28,19 +30,21 @@ Each stage is a separate skill with isolated context:
 
 | Stage | Skill | Role | Key Output |
 |-------|-------|------|------------|
-| Extract | `seller-extract` | Pull applicant data from HubSpot (BQ or UI) | Applicant Summary |
+| Extract | `seller-extract` | Pull applicant data from HubSpot (BQ or UI) | Applicant Summary YAML |
 | Investigate | `seller-investigate` | Visit URLs in Chrome, extract structured data | Handoff YAML |
 | Verdict | `seller-verdict` | Apply SOP rules, generate report | Markdown audit report |
 
-## Single Seller Audit
+## Pipeline Steps
 
 ### Step 1: Extract
 
-Invoke seller-extract (or run inline if simple):
+Invoke seller-extract (or run inline if simple). With the uid already in hand:
 ```bash
-python skills/seller-audit/scripts/bq_query_seller.py --query "<email>"
+python skills/seller-audit/scripts/bq_query_seller.py --uid "<palmstreet_userid>"
 ```
-Read the output JSON and produce the Applicant Summary. For full field mapping, see `references/extract-hubspot.md`.
+The script emits the Applicant Summary YAML on stdout (no file written). Capture it and paste straight into Step 2's prompt without rewriting. For the schema and rules behind the YAML see `references/extract-hubspot.md`.
+
+If you don't have a uid (user gave email/name/contact link only), STOP — that resolution belongs upstream of this skill. Run `python scripts/bq_seller.py --query "<term>"` from the project root, take the uid from column 1 of stdout, and re-enter this skill. Do NOT try to make the audit work without a uid; `render_verdict.py` hard-errors at the end of the pipeline if `palmstreet_userid` is missing.
 
 ### Step 2: Investigate
 
@@ -49,10 +53,10 @@ Spawn a subagent with seller-investigate:
 Task(subagent_type="general-purpose", prompt="""
 Read skills/seller-investigate/SKILL.md and follow its instructions.
 
-Applicant Summary:
-[paste applicant summary here]
+Applicant Summary YAML:
+[paste applicant summary YAML here — schema in ../seller-audit/references/extract-hubspot.md]
 
-Output: structured YAML per ../seller-audit/references/handoff-schema.md
+Output: structured handoff YAML per ../seller-audit/references/handoff-schema.md
 """)
 ```
 
@@ -71,57 +75,46 @@ Spawn a subagent with seller-verdict:
 Task(subagent_type="general-purpose", prompt="""
 Read skills/seller-verdict/SKILL.md and follow its instructions.
 
-Handoff YAML:
+Handoff YAML (slim — observed data only, applicant data is refetched from BQ
+by the script using handoff.seller.palmstreet_userid):
 [paste handoff YAML here]
 
-Output: Markdown audit report per ../seller-audit/references/output-format.md
+YOU decide the verdict. The script no longer applies any decision matrix.
+Walk SOP Part B yourself and put one of APPROVE / REJECT / REVIEW into
+`assessment.verdict`. Routing tags (ESCALATE_TO_MADDY, FLAG_TO_JAMES,
+ESCALATE_TO_ME_S_TIER, "Forward to Kay", etc.) are NOT verdicts — write them
+into `assessment.special_notes`.
+
+MANDATORY: write the input JSON to `outputs/verdict_input_<palmstreet_userid>.json`
+(use the Write tool — do NOT pipe via `echo | stdin`, quoting will fail), then:
+  python skills/seller-verdict/scripts/render_verdict.py --input outputs/verdict_input_<uid>.json
+
+Do NOT hand-write the Markdown. The script produces TWO required deliverables in one call:
+  1. outputs/audit_<palmstreet_userid>.md
+  2. an INSERT into plantstory.risk_control.seller_application_audit
+Both are required. Skipping the script silently drops the BQ row.
+
+Confirm both stderr lines appear before reporting success:
+  ✓ wrote .../outputs/audit_<uid>.md
+  ✓ inserted row into plantstory.risk_control.seller_application_audit (vid=<vid>)
+
+Each `investigation_steps[]` entry must have `heading`, `url` (or "" if none), `status`,
+`findings` (1–3 sentences of what was observed), and `signals` (bullet list of what each
+finding tells us). Sparse entries (heading-only) render as "Status: unknown" placeholders
+and waste the report's strongest narrative section — the human reviewer reads this to
+audit your reasoning.
 """)
 ```
 
-The subagent will classify tier/risk, look up the decision matrix, and render the final report.
+The subagent will classify tier/risk, pick the tri-state verdict, build the assessment JSON (with `verdict` + optional `special_notes`), run `render_verdict.py`, and confirm both the markdown write and the BQ insert succeeded.
+
+**Prompt discipline:**
+- Do NOT tell the subagent to "save the report to outputs/" as the deliverable — that phrasing has produced subagents that hand-write the .md and skip the script (and therefore skip the BQ insert). Always frame the deliverable as "run render_verdict.py and verify both side effects."
+- Do NOT mention `action_items` — that field is gone. Anything an onboarding team would have read from "Action Items" now lives in `special_notes`.
 
 ### Step 4: Deliver
 
-Save the Markdown report to `outputs/audit_{seller_name}.md` and present it to the user.
-
-## Batch Audit (5+ Sellers)
-
-### Step 1: Batch Extract
-
-```bash
-python skills/seller-audit/scripts/bq_query_seller.py --query "<name or email>" --limit 10
-```
-
-Then audit the returned VIds one by one with `--vid`.
-
-### Step 2: Pre-Screen
-
-Before launching investigations, check for cross-seller patterns:
-- **Phone clustering:** Nearly identical phone numbers (differing by 1–4 digits, same area code) suggest household connections. Flag for identity verification.
-- **Email domain clustering:** Multiple applicants from same non-public domain.
-- **Duplicate usernames:** Same PalmStreet username across records.
-
-### Step 3: Parallel Investigation
-
-Launch one seller-investigate subagent per seller:
-```
-For each seller in manifest:
-    Task(subagent_type="general-purpose", prompt="""
-    Read skills/seller-investigate/SKILL.md...
-    Applicant Summary: [seller data]
-    Output: handoff YAML
-    """)
-```
-
-Collect all handoff YAMLs when subagents complete.
-
-### Step 4: Batch Verdicts
-
-Apply seller-verdict to each handoff YAML. This can be done in parallel or sequentially.
-
-### Step 5: Compile
-
-Produce individual Markdown reports (one per seller). Do NOT produce executive summary tables or batch statistics — only individual seller sections following the template in `references/output-format.md`.
+The script has already written `outputs/audit_{palmstreet_userid}.md` and inserted the BQ row. Verify the file exists, then present it to the user. If either side effect is missing per the subagent's report, re-run Step 3 — do not paper over a failed BQ insert by treating the local markdown as the final deliverable.
 
 ## Reference Files Index
 

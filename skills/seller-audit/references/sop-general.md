@@ -29,6 +29,9 @@ No category-specific investigation rules. Use the general investigation protocol
 
 ### STEP 3: Decision Matrix
 
+The `verdict` field is strictly tri-state: **APPROVE / REJECT / REVIEW**. Any escalation
+or routing notes go into `assessment.special_notes`, never into the verdict.
+
 | TIER / RISK | HIGH | MEDIUM | LOW |
 |-------------|------|--------|-----|
 | **S** | REVIEW | REVIEW | APPROVE |

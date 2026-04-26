@@ -46,9 +46,14 @@
 
 ### STEP 3: Routing (NEVER use REJECT)
 
-1. HIGH/MEDIUM RISK or Tier F → **REVIEW** (cite specific risk; if non-US add "Forward to Kay")
-2. Tier S → **APPROVE** (Tag: ESCALATE_TO_ME_S_TIER)
-3. Tier A → **APPROVE** (Tag: ESCALATE_TO_ME_A_TIER)
-4. Tier B (no risk) → **APPROVE**
+The `verdict` field is strictly tri-state: **APPROVE / REJECT / REVIEW**. Routing tags
+(ESCALATE_TO_ME_S_TIER, ESCALATE_TO_ME_A_TIER, etc.) are NOT verdict values — write them
+into `assessment.special_notes` instead. For Collectibles, REJECT is never used —
+downgrade to REVIEW.
 
-**Notes:** Tier S/A must state "Escalate to User" in Required Actions. Non-US always → REVIEW + "Forward to Kay".
+1. HIGH/MEDIUM RISK or Tier F → `verdict: REVIEW` · `special_notes` cites the specific risk; if non-US add "Forward to Kay"
+2. Tier S → `verdict: APPROVE` · `special_notes: "Escalate to User (S Tier)"`
+3. Tier A → `verdict: APPROVE` · `special_notes: "Escalate to User (A Tier)"`
+4. Tier B (no risk) → `verdict: APPROVE`
+
+**Notes:** Tier S/A must state "Escalate to User" in `special_notes`. Non-US always → REVIEW with "Forward to Kay" in `special_notes`.

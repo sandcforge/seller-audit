@@ -50,7 +50,12 @@
 
 ### STEP 3: Routing
 
-1. VIP Referral OR Tier S → **ESCALATE_TO_RAJ**
-2. Pure Influencer (high followers, no stock) → **FLAG_TO_JAMES** (Affiliate candidate)
-3. HIGH RISK or Tier F (no VIP referral) → **REJECT**
-4. (Tier A or B) + LOW RISK → **APPROVE**
+The `verdict` field is strictly tri-state: **APPROVE / REJECT / REVIEW**. Routing tags
+(ESCALATE_TO_RAJ, FLAG_TO_JAMES, etc.) are NOT verdict values — write them into
+`assessment.special_notes` instead.
+
+1. VIP Referral OR Tier S → `verdict: APPROVE` · `special_notes: "Escalate to Raj"`
+2. Pure Influencer (high followers, no stock) → `verdict: REVIEW` · `special_notes: "Flag to James — Affiliate candidate"`
+3. HIGH RISK or Tier F (no VIP referral) → `verdict: REJECT`
+4. (Tier A or B) + LOW RISK → `verdict: APPROVE`
+5. Anything else (e.g. MEDIUM risk in A/B) → `verdict: REVIEW`

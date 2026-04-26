@@ -13,37 +13,20 @@ This skill is invoked by the seller-audit orchestrator (or manually) when you ne
 
 ## Method 1: BigQuery Script (Default)
 
-Run the bundled scripts to query `plantstory.hubspot.Contact`. Both scripts use
-sandbox `gcloud` Application Default Credentials and write JSON output to the
-project-level `outputs/` folder.
-
-**Prerequisite:** the shell must have `./activate.sh` sourced first — see the
-project `CLAUDE.md` for the sandbox activation rule.
-
-### Single-seller lookup — `bq_query_seller.py`
+This skill enters with a `palmstreet_userid` already in hand (the orchestrator either received it from the user or resolved it via the standalone lookup tool `scripts/bq_seller.py` — see the project `CLAUDE.md`). The extraction step uses one bundled script:
 
 ```bash
-# Search by email, name, phone, or PalmStreet username
-python skills/seller-audit/scripts/bq_query_seller.py --query "seller@example.com"
-python skills/seller-audit/scripts/bq_query_seller.py --query "Firstname Lastname"
-
-# Full whitelisted row by HubSpot VId
-python skills/seller-audit/scripts/bq_query_seller.py --vid 217268720946
+python skills/seller-audit/scripts/bq_query_seller.py --uid <palmstreet_userid>
 ```
 
-The script accepts `--query` and `--vid` only. Do **not** pass `--email` or
-`--userid` — those flags don't exist and will error out.
+It queries `plantstory.hubspot.Contact` via sandbox `gcloud` Application Default Credentials and emits a fully-formed Applicant Summary YAML to **stdout only** — no file is written. The YAML is ready to paste straight into the seller-investigate Task prompt.
 
-- `--query` → list of matching VIds + summary fields, printed to stdout.
-- `--vid` → full whitelisted row written to `outputs/seller_<vid>.json`, key fields printed.
+**Prerequisite:** the shell must have `./activate.sh` sourced first — see the project `CLAUDE.md` for the sandbox activation rule.
 
-### Latest applications — `bq_latest_applications.py`
-
-```bash
-python skills/seller-audit/scripts/bq_latest_applications.py --limit 20
-```
-
-Default `--limit` is 3. Output is written to `outputs/latest_applications_<n>.json`.
+**Notes:**
+- ~80 uids in BQ correspond to multiple HubSpot Contact rows. The script picks the most recent by `app__date` and warns on stderr (`# WARNING: N HubSpot Contact rows share …`).
+- If you need to persist the YAML, redirect: `python … --uid <uid> > outputs/applicant_<uid>.yaml`.
+- Don't have a uid? That's outside this skill's job. Run `python scripts/bq_seller.py --query "<term>"` (project-root script, NOT a skill component) to resolve email/name/etc. → uid first.
 
 ### Field mapping
 
@@ -69,41 +52,19 @@ Use `read_page` or `get_page_text` to extract the left sidebar ("About this cont
 
 If the page redirects to login, ask the user to log in first.
 
-## Output: Applicant Summary
+## Output: Applicant Summary YAML
 
-For the full field mapping (BQ column → audit field) and the structured output template, read:
-> `../seller-audit/references/extract-hubspot.md`
+The hand-off to seller-investigate is a structured YAML document — not Markdown. For the full schema, field-by-field rules, and a worked example, read:
+> `../seller-audit/references/extract-hubspot.md` (section: "Output: Applicant Summary YAML")
 
-Regardless of method, produce this structured summary before returning:
+**Method 1 (--uid) produces this YAML for you.** `bq_query_seller.py --uid <palmstreet_userid>` emits a fully-formed Applicant Summary YAML to **stdout only** (no file is written). Capture the stdout and paste it directly into the next Task prompt; if you need it on disk, redirect to `outputs/applicant_<uid>.yaml`. Field names, types, COALESCE rules, `category` multi-value joining, and field ordering all match `extract-hubspot.md`.
 
-```
-## Applicant Summary
-- **Name:** [First Last]
-- **Company:** [Company Name]
-- **Email:** [email]
-- **Phone:** [phone] ([area code location])
-- **Category:** [from Typeform/Aloy Category]
+**Method 2 (HubSpot UI) requires you to assemble the YAML by hand** following the schema doc. Top-level keys: `seller`, `online_assets`, `business_claims`. Identity field names (`hubspot_id`, `palmstreet_userid`, `phone_area_code_location`) match `handoff-schema.md` so investigate can copy them through without renaming. Discipline (same as `handoff-schema.md`):
+- Every field present — use `null` for unknown, `[]` for empty arrays.
+- Numbers as numbers, not strings (`200`, not `"200"`; `35.00`, not `"$35"`).
+- URLs in full `https://` form.
 
-## Online Assets (from application)
-- **Website URL:** [url or "None"]
-- **Social Media:** [url or "None"]
-- **PalmStreet Username:** [username]
-
-## Business Claims
-- **Inventory Count:** [number]
-- **Average Price:** [dollar amount]
-- **Shipping Volume:** [value or "N/A"]
-
-## Internal Status
-- **Sales Stage:** [Applied/Approved/Rejected]
-- **Approval Date:** [date or "N/A"]
-- **Contact Owner:** [name or owner ID]
-- **Referral:** [name or "None"]
-```
-
-## Batch Extraction
-
-For search-style extraction, use query mode to get matching VIds first, then use `--vid` for full details.
+In either method, if `palmstreet_userid` ends up `null`, surface the gap to the orchestrator — `render_verdict.py` will hard-error downstream, so stopping here is cheaper than discovering it after a full investigation. (For `--uid` mode this is impossible by construction: the script looks up rows BY uid, so a successful run guarantees the uid is present.)
 
 ## Security Note
 

@@ -4,24 +4,21 @@ The Scraper Agent MUST output this exact YAML structure for each seller. The Ver
 
 ## Schema
 
+The handoff carries ONLY what the investigator observed. Applicant identity,
+HubSpot-side metadata, and form claims (`name`, `email`, `phone`, `online_assets`,
+`business_claims`, etc.) are NOT in the handoff — `render_verdict.py` re-fetches
+those from BigQuery via `bq_query_seller.py --uid <uid>` at verdict time, using
+the `seller.palmstreet_userid` join key below.
+
 ```yaml
 seller:
-  name: string                    # Full name from HubSpot
-  company: string or null         # Company name if different
-  hubspot_id: string              # ContactId (for URL construction)
-  email: string
-  phone: string or null
-  phone_area_code_location: string or null
-
-category:
-  claimed: string                 # From HubSpot Typeform/Aloy Category
-  actual: string                  # Observed from storefront content, or same as claimed
-  mismatch: boolean               # true if claimed ≠ actual
-
-business_claims:                  # From HubSpot application (may be empty)
-  inventory_count: integer or null
-  average_price: float or null
-  shipping_volume: string or null
+  palmstreet_userid: string       # REQUIRED — the only seller field on the handoff.
+                                  # Acts as the join key: render_verdict.py uses it to
+                                  # call bq_query_seller.py and re-fetch the applicant
+                                  # data (name / email / phone / online_assets /
+                                  # business_claims) from BigQuery. Pull from
+                                  # HubSpot's `palmstreet_userid` column. render_verdict.py
+                                  # hard-errors if this is missing — there is no fallback.
 
 platforms:                        # Array of platform investigation results
   - platform: string              # instagram | whatnot | facebook | ebay | etsy | poshmark | tiktok | mercari | website | other
@@ -48,15 +45,24 @@ platforms:                        # Array of platform investigation results
     risks: [string]               # Specific risk signals found on this platform, or empty
     raw_metrics_text: string or null  # Original text from page extraction (e.g., "1.5K Followers · 1.2K Sold") — sanity check anchor for Verdict Agent
 
-investigation_summary:
+investigation_summary:                # Investigate WRITES this block — cross-platform
+                                      # aggregates, the actual-category finding, and process metadata.
   total_platforms_checked: integer    # Count of platforms ACTUALLY VISITED (any status: active/404/login_blocked/private). Does NOT include negative websearch results where no profile was found. Must equal len(platforms[]).
   total_platforms_active: integer     # Count of platforms[] entries with status == "active"
   total_followers: integer or null    # Sum across ALL active platforms. Null if every active platform has metrics.followers == null. A single non-null value is summed with 0 for nulls; but if ALL are null, emit null (not 0) — "0 followers" is a negative signal and must not be synthesized from missing data.
   total_items_sold: integer or null   # Same null-propagation rule as total_followers.
   highest_rating: float or null
+  actual_category: string or null     # What the seller is ACTUALLY selling, observed across storefronts.
+                                      # Aggregated from `platforms[].categories_observed[]`. Single string;
+                                      # if the storefront sells multiple things, join with " / ".
+                                      # Verdict compares this against the applicant's claimed category
+                                      # (re-fetched from BQ at verdict time) using the protocol in
+                                      # edge-cases.md#category-mismatch. If the investigation is
+                                      # indeterminate (no active platforms / login-walled / inconclusive
+                                      # after a full ReAct loop), emit null and document the reason in
+                                      # `early_exit_reason` so verdict knows the actual is not observed.
   risk_flags: [string]            # Aggregated risk signals across all platforms
   china_connection_signals: [string]  # From China Connection Protocol, or empty
-  phone_cluster_note: string or null  # If phone number matches another seller in batch
   investigation_iterations: integer   # How many ReAct loop iterations were executed (1–5)
   early_exit_reason: string or null   # Why the loop exited early (e.g., "STRONG_APPROVE: active Whatnot store with 1.5K followers + Instagram cross-reference"), or null if max iterations reached
   sop_applied: string                 # Which SOP was used for evaluation (e.g., "sop-plants", "sop-shiny"). If category mismatch, this reflects the ACTUAL category's SOP, not the claimed one.
@@ -69,34 +75,20 @@ investigation_summary:
 2. **Metrics must be integers/floats, not strings.** Convert "1.2K" → 1200, "15.6K" → 15600 before outputting.
 3. **URLs must be full https:// format.** Never use bare domains.
 4. **One entry per platform visited.** If a platform returned 404, still include it with `status: "404"` and null metrics.
-5. **`categories_observed` must reflect ACTUAL content**, not the seller's claimed category. This is what Verdict Agent uses to detect mismatches.
+5. **`categories_observed` (per-platform) and `actual_category` (aggregated) must reflect ACTUAL content** — what you saw on the storefronts. Verdict Agent re-fetches the applicant's claimed category from BigQuery and compares it against `actual_category` using the protocol in edge-cases.md#category-mismatch to decide if a difference is substantive. Never substitute the claim as a shortcut to skip investigation. If the storefront is empty / 404 / login-walled / inconclusive after a full ReAct loop, emit `actual_category: null` and document the reason in `early_exit_reason` so verdict knows the actual is not observed.
 6. **`risk_flags` is the critical field** for Verdict Agent. Be explicit: "chinese_text_in_listing_photos", "fake_reviews_suspected", "all_stock_photos" — not just "HIGH RISK".
 7. **`total_followers` in investigation_summary** = sum across all active platforms. Verdict Agent uses this for tier classification, not individual platform counts. **Null-propagation:** if EVERY active platform has `metrics.followers == null`, emit `null` here — do NOT emit `0`. "0 followers" is a real negative signal and must never be synthesized from missing data. Same rule applies to `total_items_sold`.
 7a. **`total_platforms_checked`** counts platforms that were actually visited (entries in `platforms[]`), regardless of status. Websearch queries that returned zero results and produced no `platforms[]` entry do NOT count. If you searched Instagram/TikTok/Etsy and found nothing, that's 0 additional checks, not 3 — reflect that in the investigation narrative, not in this number.
 8. **`raw_metrics_text`** must contain the original text string from which metrics were parsed. This lets the Verdict Agent sanity-check parsed numbers (e.g., verify "1.5K" was correctly converted to 1500, not 15000).
 9. **`sop_applied`** must name the SOP file actually used. If a category mismatch caused an SOP switch, this reflects the switched-to SOP.
 10. **`audit_timestamp`** must be set to the current UTC time when the investigation completes.
+11. **No applicant pass-through.** The handoff carries ONLY observed data. Do NOT include `name`, `email`, `phone`, `online_assets`, or `business_claims` blocks — `render_verdict.py` re-fetches those from BigQuery via `bq_query_seller.py --uid <palmstreet_userid>` at verdict time. The handoff's only seller-identity field is `seller.palmstreet_userid` (the join key).
 
 ## Example (abbreviated)
 
 ```yaml
 seller:
-  name: Frankie Clemente
-  company: Frankie's Fossils
-  hubspot_id: "123456789"
-  email: frankie@example.com
-  phone: "(555) 123-4567"
-  phone_area_code_location: "Los Angeles, CA"
-
-category:
-  claimed: Collectibles
-  actual: Collectibles
-  mismatch: false
-
-business_claims:
-  inventory_count: 200
-  average_price: 35.00
-  shipping_volume: null
+  palmstreet_userid: "aB12cD34eF56gH78iJ90"
 
 platforms:
   - platform: whatnot
@@ -153,9 +145,9 @@ investigation_summary:
   total_followers: 4723
   total_items_sold: 1247
   highest_rating: 5.0
+  actual_category: "fossils / minerals / crystals"
   risk_flags: []
   china_connection_signals: []
-  phone_cluster_note: null
   investigation_iterations: 2
   early_exit_reason: "STRONG_APPROVE: active Whatnot store with 1523 followers, 1247 sales, 5.0 rating + Instagram cross-reference with 3200 followers"
   sop_applied: "sop-collectibles"

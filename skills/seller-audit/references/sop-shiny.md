@@ -51,6 +51,10 @@
 
 ### STEP 3: Decision Matrix
 
+The `verdict` field is strictly tri-state: **APPROVE / REJECT / REVIEW**. Action tags
+("Forward to Kay", "Policy Reminder", etc.) are NOT verdict values — write them into
+`assessment.special_notes` instead.
+
 | TIER / RISK | HIGH | MEDIUM | LOW |
 |-------------|------|--------|-----|
 | **S** | REVIEW | REVIEW | APPROVE |
@@ -58,7 +62,7 @@
 | **B** | REJECT | REVIEW | APPROVE |
 | **F** | REJECT | REVIEW | REJECT |
 
-### Required Actions
-- Intl Jewelry/Crystal: "Forward to Kay"
-- Missing Link: "Request More Info (Link)"
-- Upcycled/Repurposed: "Policy Reminder"
+### Required Special Notes phrasing (when applicable)
+- Intl Jewelry/Crystal → "Forward to Kay"
+- Missing Link → "Request More Info (Link)"
+- Upcycled/Repurposed → "Policy Reminder"

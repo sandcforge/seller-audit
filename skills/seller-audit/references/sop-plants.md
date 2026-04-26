@@ -80,14 +80,18 @@ Key principles:
 
 ### STEP 3: Final Routing
 
-1. HIGH_RISK + Tier S → **REVIEW**
-2. HIGH_RISK + NOT Tier S → **REJECT**
-3. MISSING_INFO → **REVIEW** (Action: Contact seller for valid link)
-4. Tier S (no risks) → **ESCALATE_TO_MADDY** (VIP/White Glove)
-5. Tier A → **APPROVE** (Tag: CONTACT_SELLER)
-6. Tier B → **APPROVE** (Tag: ROOKIE_SELLER)
-7. Tier F (no missing info) → **REJECT**
+The `verdict` field is strictly tri-state: **APPROVE / REJECT / REVIEW**. Routing tags
+(ESCALATE_TO_MADDY, CONTACT_SELLER, ROOKIE_SELLER, etc.) are NOT verdict values — write
+them into `assessment.special_notes` instead.
 
-### Required Action Notes
-- Tier S: "Escalate to Maddy for VIP onboarding"
-- Missing Link: "Request More Info (Link) — Follow up applicant"
+1. HIGH_RISK + Tier S → `verdict: REVIEW`
+2. HIGH_RISK + NOT Tier S → `verdict: REJECT`
+3. MISSING_INFO → `verdict: REVIEW` · `special_notes: "Contact seller for valid link"`
+4. Tier S (no risks) → `verdict: APPROVE` · `special_notes: "Escalate to Maddy for VIP onboarding (White Glove)"`
+5. Tier A → `verdict: APPROVE` · `special_notes: "Tag: CONTACT_SELLER"`
+6. Tier B → `verdict: APPROVE` · `special_notes: "Tag: ROOKIE_SELLER"`
+7. Tier F (no missing info) → `verdict: REJECT`
+
+### Required Special Notes phrasing (when applicable)
+- Tier S → "Escalate to Maddy for VIP onboarding"
+- Missing Link → "Request More Info (Link) — Follow up applicant"

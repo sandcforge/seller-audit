@@ -23,23 +23,48 @@ All URL visits MUST go through `mcp__Claude_in_Chrome__*` tools. No exceptions.
 
 ## Inputs
 
-You receive an Applicant Summary (from seller-extract) containing the seller's identity, URLs, category, and business claims.
+You receive an Applicant Summary YAML (from seller-extract) containing the seller's identity, URLs, and business claims. Top-level keys: `seller`, `online_assets`, `business_claims`. Schema and field rules are in `../seller-audit/references/extract-hubspot.md` (section: "Output: Applicant Summary YAML"). You READ this YAML to drive your investigation — you do NOT pass it through to the handoff.
 
-## Scripts (run before Chrome visits)
+URLs to investigate come from `online_assets.website` and `online_assets.social_media`. The claimed category is `business_claims.category` (single string; multi-category claims are joined with `" / "`) — use it to load the right SOP Part A and as the baseline for the category-mismatch check. You may also verify numeric claims like `inventory_count` against what you observe and call out discrepancies in `risk_flags`.
 
-### 1. URL Normalization
-Before visiting any URL, run:
+## Output contract (handoff)
+
+Your output is a slim handoff YAML containing ONLY observed data plus a join key. Do NOT pass through `name`, `email`, `phone`, `online_assets`, or `business_claims` — `render_verdict.py` re-fetches those from BigQuery at verdict time using `seller.palmstreet_userid`. The full schema is in `../seller-audit/references/handoff-schema.md`. Top-level blocks:
+
+- `seller.palmstreet_userid` — the only seller-identity field (join key for the BQ refetch). Copy from input verbatim.
+- `platforms[]` — one entry per platform you actually visited, with metrics, bio, risks, etc.
+- `investigation_summary` — cross-platform aggregates (`total_followers`, `total_items_sold`, `risk_flags`, ...), the actual-category finding (`actual_category`, aggregated from `platforms[].categories_observed[]`), and process metadata (`investigation_iterations`, `early_exit_reason`, `sop_applied`, `audit_timestamp`).
+
+Your category *finding* lives in `investigation_summary.actual_category`. Verdict re-fetches the claimed category from BigQuery and computes mismatch on the fly. If the storefront is empty / 404 / login-walled / inconclusive, emit `actual_category: null` and document the reason in `early_exit_reason` — do NOT substitute the claimed category as a shortcut.
+
+## Scripts (run around Chrome visits)
+
+### 1. URL Normalization (run ONCE, before any Chrome visit)
 ```bash
 echo '["url1", "url2", ...]' | python skills/seller-investigate/scripts/normalize_urls.py
 ```
-This applies all platform-specific rules (invite→user, short link flagging, junk detection, tracking param removal). Only visit URLs where `is_junk` is false. URLs with `needs_chrome_redirect: true` must be visited in Chrome for resolution.
+Applies all platform-specific rules (invite→user, short link flagging, junk detection, tracking param removal) and emits one object per URL with: `original`, `normalized`, `platform`, `is_junk`, `junk_reason`, `notes`, `needs_chrome_visit`, and **`expected_identifier`** — the canonical identifier (username / shop name / numeric id) the visited page MUST resolve to.
 
-### 2. URL Integrity Verification
-After normalization, verify each URL hasn't been mutated:
+Only visit URLs where `is_junk` is false. URLs with `needs_chrome_visit: true` must be visited in Chrome for resolution. **Keep the full normalize output in your working state** — you'll feed it back into verify in step 2.
+
+### 2. URL Integrity Verification (run ONCE, after Chrome visits — batch mode)
+After visiting all P1 URLs in Chrome, take the normalize output, attach the URL Chrome actually landed on as a `visited` field, and pipe the array into verify in a single batch call:
+
 ```bash
-python skills/seller-investigate/scripts/verify_url_integrity.py --original "raw_hubspot_url" --visited "normalized_url"
+echo '[
+  {"original": "...", "expected_identifier": "frankiefossils", "visited": "https://www.whatnot.com/user/frankiefossils", "is_junk": false},
+  {"original": "...", "expected_identifier": "granitestatecoinsandcurrency", "visited": "https://granitestatecoinsandcurrency.etsy.com", "is_junk": false}
+]' | python skills/seller-investigate/scripts/verify_url_integrity.py --batch
 ```
-If `match: false`, trust the original and re-normalize.
+
+The script:
+- Skips entries where `is_junk: true` (nothing was visited).
+- Uses `expected_identifier` from normalize as the authoritative identifier — no need to re-derive from `original`.
+- Returns one result per non-junk entry with `match`, `diff_positions`, `diff_summary`, `recommendation`.
+
+For any result with `match: false` and `recommendation: "trust_original"`, treat the visited page as a different identity (silent character mutation, redirect to a different account, etc.) and either re-visit the normalized URL or flag in `risks`.
+
+**Do not call verify per-URL with `--original/--visited`** — that legacy mode still works for one-off debugging, but the batch flow is the default and avoids forgetting to verify any URL.
 
 ### 3. Identity Scoring (for Google Search results only)
 When attributing a Google Search result to the applicant:

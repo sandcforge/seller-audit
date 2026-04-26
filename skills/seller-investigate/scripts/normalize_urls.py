@@ -13,7 +13,7 @@ import argparse
 from typing import List, Dict, Any, Tuple
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
-from platform_utils import detect_platform
+from platform_utils import detect_platform, extract_identifier
 
 
 def normalize_url(url: str) -> Tuple[str, str, bool, str, str]:
@@ -364,7 +364,12 @@ def process_urls(raw_urls: List[str]) -> List[Dict[str, Any]]:
                 'junk_reason': junk_reason,
                 'notes': notes,
                 'needs_chrome_visit': False,
-                'needs_seller_extraction': False
+                'needs_seller_extraction': False,
+                # The identifier (username/shop/numeric id) that the visited
+                # page MUST match. Carried through to verify_url_integrity.py
+                # so verification is a single batch call after Chrome visits,
+                # not a per-URL --original/--visited round-trip.
+                'expected_identifier': None,
             }
 
             if not is_junk:
@@ -373,6 +378,11 @@ def process_urls(raw_urls: List[str]) -> List[Dict[str, Any]]:
                 result['needs_seller_extraction'] = any(
                     x in notes for x in ['extract_username', 'extract_shop', 'extract_seller']
                 )
+                # Compute expected identifier from the normalized URL —
+                # normalization is the authoritative identifier; verify only
+                # checks that Chrome's resolved URL didn't drift from this.
+                ident = extract_identifier(normalized) if normalized else ''
+                result['expected_identifier'] = ident if ident else None
 
             results.append(result)
 
