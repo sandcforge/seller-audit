@@ -1,6 +1,6 @@
 # CollX Scraping Guide
 
-> **Common extraction flow:** Navigate → detect page type → check for 404/login wall → extract metrics via `get_page_text` or screenshot → record per-page data (see `loop-react.md` Section 2.5.5) → output YAML per `handoff-schema.md`.
+> **Common extraction flow:** Navigate → detect page type → check for 404/login wall → extract metrics via `get_page_text` or screenshot → record per-page data (see `loop-react.md` Section 2.5.5) → output YAML per `../../seller-audit/references/schema-investigation.md`.
 
 > **URL format rules** (share links, profile URLs) → see `url-normalization.md` CollX section.
 

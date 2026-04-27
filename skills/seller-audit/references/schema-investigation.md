@@ -1,23 +1,23 @@
-# Scraper → Verdict Handoff Schema
+# Investigation YAML Schema (Scraper → Verdict)
 
-The Scraper Agent MUST output this exact YAML structure for each seller. The Verdict Agent consumes this structure directly — no free-form text, no partial data.
+The Scraper Agent MUST output this exact YAML structure for each seller, written to `<work_dir>/investigation.yaml`. The Verdict Agent consumes this structure directly — no free-form text, no partial data.
 
 ## Schema
 
-The handoff carries ONLY what the investigator observed. Applicant identity,
+The investigation carries ONLY what the investigator observed. Applicant identity,
 HubSpot-side metadata, and form claims (`name`, `email`, `phone`, `online_assets`,
-`business_claims`, etc.) are NOT in the handoff — `render_verdict.py` re-fetches
+`business_claims`, etc.) are NOT in the investigation — `generate_report.py` re-fetches
 those from BigQuery via `bq_query_seller.py --uid <uid>` at verdict time, using
 the `seller.palmstreet_userid` join key below.
 
 ```yaml
 seller:
-  palmstreet_userid: string       # REQUIRED — the only seller field on the handoff.
-                                  # Acts as the join key: render_verdict.py uses it to
+  palmstreet_userid: string       # REQUIRED — the only seller field on the investigation.
+                                  # Acts as the join key: generate_report.py uses it to
                                   # call bq_query_seller.py and re-fetch the applicant
                                   # data (name / email / phone / online_assets /
                                   # business_claims) from BigQuery. Pull from
-                                  # HubSpot's `palmstreet_userid` column. render_verdict.py
+                                  # HubSpot's `palmstreet_userid` column. generate_report.py
                                   # hard-errors if this is missing — there is no fallback.
 
 platforms:                        # Array of platform investigation results
@@ -82,7 +82,7 @@ investigation_summary:                # Investigate WRITES this block — cross-
 8. **`raw_metrics_text`** must contain the original text string from which metrics were parsed. This lets the Verdict Agent sanity-check parsed numbers (e.g., verify "1.5K" was correctly converted to 1500, not 15000).
 9. **`sop_applied`** must name the SOP file actually used. If a category mismatch caused an SOP switch, this reflects the switched-to SOP.
 10. **`audit_timestamp`** must be set to the current UTC time when the investigation completes.
-11. **No applicant pass-through.** The handoff carries ONLY observed data. Do NOT include `name`, `email`, `phone`, `online_assets`, or `business_claims` blocks — `render_verdict.py` re-fetches those from BigQuery via `bq_query_seller.py --uid <palmstreet_userid>` at verdict time. The handoff's only seller-identity field is `seller.palmstreet_userid` (the join key).
+11. **No applicant pass-through.** The investigation carries ONLY observed data. Do NOT include `name`, `email`, `phone`, `online_assets`, or `business_claims` blocks — `generate_report.py` re-fetches those from BigQuery via `bq_query_seller.py --uid <palmstreet_userid>` at verdict time. The investigation's only seller-identity field is `seller.palmstreet_userid` (the join key).
 
 ## Example (abbreviated)
 

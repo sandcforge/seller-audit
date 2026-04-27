@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
 """
-Verdict Renderer
+Audit Report Renderer
 
-Takes handoff YAML data + agent-provided tier/risk assessment, applies decision matrix,
-and renders a Markdown report.
+Reads three YAMLs from the per-attempt work directory:
+  - applicant.yaml      (Step 1)
+  - investigation.yaml  (Step 2)
+  - verdict.yaml        (Step 3 — written by the verdict subagent; top-level
+                          fields are the assessment itself: verdict, tier, risk,
+                          investigation_steps, special_notes, *_justification)
+
+Produces three deliverables in one call:
+  1. <work_dir>/audit.md
+  2. INSERT into plantstory.risk_control.seller_application_audit
+  3. <work_dir>/_meta.json + outputs/<uid>/latest symlink updates
 
 Supports all four category SOPs: General, Plants, Shiny, Beauty, Collectibles.
 """
@@ -20,10 +29,10 @@ from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime, timezone
 
 
-# Path to the upstream applicant-data lookup script. The handoff carries only
-# the palmstreet_userid join key — render_verdict refetches the full applicant
+# Path to the upstream applicant-data lookup script. The investigation carries only
+# the palmstreet_userid join key — render_report refetches the full applicant
 # record (name / email / phone / online_assets / business_claims) from BigQuery
-# at verdict time so the handoff stays slim and observed-data-only.
+# at verdict time so the investigation stays slim and observed-data-only.
 _REPO_ROOT_FROM_THIS_FILE = Path(__file__).resolve().parents[3]
 BQ_QUERY_SELLER_SCRIPT = (
     _REPO_ROOT_FROM_THIS_FILE / 'skills' / 'seller-audit' / 'scripts' / 'bq_query_seller.py'
@@ -35,8 +44,8 @@ def fetch_applicant(uid: str) -> Dict[str, Any]:
     bq_query_seller.py. Returns the parsed dict (top-level keys: seller,
     online_assets, business_claims). Raises RuntimeError on lookup failure.
 
-    The handoff schema deliberately does NOT carry these blocks; the
-    palmstreet_userid join key on the handoff is the single source we use to
+    The investigation schema deliberately does NOT carry these blocks; the
+    palmstreet_userid join key on the investigation is the single source we use to
     re-derive applicant data here.
     """
     if not BQ_QUERY_SELLER_SCRIPT.exists():
@@ -73,7 +82,7 @@ VALID_VERDICTS = ('APPROVE', 'REJECT', 'REVIEW')
 def get_verdict(assessment: Dict[str, Any]) -> str:
     """Return the agent-supplied verdict, validated.
 
-    The verdict agent decides — render_verdict.py is pure rendering. This
+    The verdict agent decides — generate_report.py is pure rendering. This
     function only enforces the tri-state contract and surfaces a clean error
     if the assessment is malformed.
 
@@ -84,10 +93,9 @@ def get_verdict(assessment: Dict[str, Any]) -> str:
     raw = assessment.get('verdict')
     if raw is None:
         raise ValueError(
-            'assessment.verdict is required — render_verdict.py no longer '
-            'derives it from tier/risk/category. Pick one of '
-            f'{VALID_VERDICTS}; put any escalation tag (ESCALATE_TO_MADDY, '
-            'FLAG_TO_JAMES, etc.) into assessment.special_notes.'
+            f'assessment.verdict is required — pick one of {VALID_VERDICTS}. '
+            'Put any escalation tag (ESCALATE_TO_MADDY, FLAG_TO_JAMES, etc.) '
+            'into assessment.special_notes.'
         )
     verdict = str(raw).strip().upper()
     if verdict not in VALID_VERDICTS:
@@ -140,7 +148,7 @@ def render_investigation_steps(steps: List[Dict[str, Any]]) -> str:
             output += f'\n{findings}\n'
 
         if signals:
-            output += '\nSignals:\n'
+            output += '\n'
             for signal in signals:
                 output += f'- {signal}\n'
 
@@ -179,7 +187,7 @@ def _normalize_bullets(value: Any, max_bullets: int = 3) -> List[str]:
     return [s] if s else []
 
 
-def render_conclusion_section(assessment: Dict[str, Any], handoff: Dict[str, Any]) -> str:
+def render_conclusion_section(assessment: Dict[str, Any], investigation: Dict[str, Any]) -> str:
     """Render the top-level Conclusion section.
 
     Layout:
@@ -246,22 +254,22 @@ def render_conclusion_section(assessment: Dict[str, Any], handoff: Dict[str, Any
 
 def render_report(input_data: Dict[str, Any]) -> str:
     """Render complete markdown report."""
-    handoff = input_data.get('handoff', {})
+    investigation = input_data.get('investigation', {})
     assessment = input_data.get('assessment', {})
 
-    handoff_seller = handoff.get('seller', {}) or {}
+    investigation_seller = investigation.get('seller', {}) or {}
     # PalmStreet user id is the join key for the applicant refetch and the
     # primary seller identifier in the local filename. Required — no fallback.
-    uid = handoff_seller.get('palmstreet_userid') or handoff_seller.get('user_id')
+    uid = investigation_seller.get('palmstreet_userid')
     if not uid:
         raise ValueError(
-            'palmstreet_userid is required in handoff.seller — '
-            'no fallback to hubspot_id. Update the handoff to include it.'
+            'palmstreet_userid is required in investigation.seller — '
+            'update investigation.yaml to include it.'
         )
 
     # Resolve applicant data: prefer caller-provided block, otherwise refetch
-    # from BigQuery. The handoff itself no longer carries name/email/phone/
-    # online_assets/business_claims — those live in the applicant payload.
+    # from BigQuery. Identity fields (name/email/phone/online_assets/business_claims)
+    # live exclusively in the applicant payload, never in the investigation.
     applicant = input_data.get('applicant')
     if applicant is None:
         applicant = fetch_applicant(uid)
@@ -270,7 +278,7 @@ def render_report(input_data: Dict[str, Any]) -> str:
         input_data['applicant'] = applicant
 
     # Section 1: Conclusion (verdict, special notes, tier, risk)
-    output = render_conclusion_section(assessment, handoff)
+    output = render_conclusion_section(assessment, investigation)
 
     output += '---\n\n'
 
@@ -298,7 +306,7 @@ BQ_TABLE_FQN = 'plantstory.risk_control.seller_application_audit'
 def _repo_root() -> Path:
     """Resolve the seller-audit repo root.
 
-    The script lives at <repo>/skills/seller-verdict/scripts/render_verdict.py,
+    The script lives at <repo>/skills/seller-verdict/scripts/generate_report.py,
     so three parents up from this file is the repo root regardless of cwd.
     """
     return Path(__file__).resolve().parents[3]
@@ -341,7 +349,7 @@ def _flatten_applicant_data(applicant: Dict[str, Any]) -> Dict[str, str]:
       business_claims.inventory_count    → inventory_size
       business_claims.selling_experience → experience_years
       business_claims.referred_by        → referred_by (already coalesced upstream
-                                           in seller-extract: prefer Contact.referred_by,
+                                           by bq_query_seller.py: prefer Contact.referred_by,
                                            fall back to Contact.referring_friend)
       online_assets.website              → business_website
       online_assets.social_media         → social_url
@@ -390,11 +398,11 @@ def _summarize(
     report_md: str,
     max_chars: int = 600,
     assessment: Optional[Dict[str, Any]] = None,
-    handoff: Optional[Dict[str, Any]] = None,
+    investigation: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Build the BQ ``context_summary`` blurb.
 
-    Preferred path (when called with assessment+handoff): synthesize a 1-2
+    Preferred path (when called with assessment+investigation): synthesize a 1-2
     sentence summary from structured fields — verdict, platform counts, and
     the agent's tier_justification / verdict_justification. This replaces the
     old behavior of scraping a `> [summary]` blockquote from the rendered
@@ -407,7 +415,7 @@ def _summarize(
     """
     if assessment is not None:
         verdict = get_verdict(assessment)
-        inv = (handoff or {}).get('investigation_summary') if handoff else None
+        inv = (investigation or {}).get('investigation_summary') if investigation else None
         platforms_checked = (inv or {}).get('total_platforms_checked')
         active_platforms = (inv or {}).get('total_platforms_active')
         parts: List[str] = []
@@ -440,18 +448,18 @@ def build_row(
     vid_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Assemble a row matching the seller_application_audit BQ schema."""
-    handoff = input_data.get('handoff', {}) or {}
+    investigation = input_data.get('investigation', {}) or {}
     assessment = input_data.get('assessment', {}) or {}
-    handoff_seller = handoff.get('seller', {}) or {}
+    investigation_seller = investigation.get('seller', {}) or {}
 
-    # PalmStreet uid → user_id column. The handoff's seller block carries ONLY
+    # PalmStreet uid → user_id column. The investigation's seller block carries ONLY
     # palmstreet_userid (the join key); all other applicant fields come from
     # the refetched applicant payload below.
-    uid = handoff_seller.get('palmstreet_userid') or handoff_seller.get('user_id')
+    uid = investigation_seller.get('palmstreet_userid')
     if not uid:
         raise ValueError(
-            'palmstreet_userid is required in handoff.seller — '
-            'no fallback. Update the handoff to include it.'
+            'palmstreet_userid is required in investigation.seller — '
+            'update investigation.yaml to include it.'
         )
 
     # Applicant data is refetched from BigQuery in render_report and stashed on
@@ -486,10 +494,10 @@ def build_row(
             })
 
     # full_data captures everything the verdict had access to: the slim
-    # observed-data handoff, the refetched applicant block, and the agent's
+    # observed-data investigation, the refetched applicant block, and the agent's
     # assessment. This is the canonical record for downstream consumers.
     full_data = {
-        'handoff': handoff,
+        'investigation': investigation,
         'applicant': applicant,
         'assessment': assessment,
     }
@@ -513,7 +521,7 @@ def build_row(
         'other_actions': counts['other'],
         'applicant_data': json.dumps(_flatten_applicant_data(applicant)),
         'full_data': json.dumps(full_data),
-        'context_summary': _summarize(report_md, assessment=assessment, handoff=handoff),
+        'context_summary': _summarize(report_md, assessment=assessment, investigation=investigation),
         'user_id': uid,
         # NOTE: the `note` BQ column is reserved for human-entered annotations
         # and is intentionally NOT written by this script. Do not add it back —
@@ -522,17 +530,56 @@ def build_row(
     }
 
 
-def write_md(name: str, report_md: str) -> Path:
-    """Write the rendered report to <repo>/outputs/audit_{name}.md (overwrite).
-
-    `name` is whatever identifier the caller wants in the filename — typically
-    the PalmStreet uid, falling back to the HubSpot vid.
-    """
-    out_dir = _repo_root() / 'outputs'
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f'audit_{name}.md'
+def write_md(out_path: Path, report_md: str) -> Path:
+    """Write the rendered report to ``<work_dir>/audit.md`` (overwrite)."""
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(report_md, encoding='utf-8')
     return out_path
+
+
+def _update_latest_symlink(work_dir: Path) -> Path:
+    """Atomically point ``outputs/<uid>/latest`` at the current attempt.
+
+    ``work_dir`` is ``outputs/<uid>/<NN>``. We write a relative symlink so the
+    ``outputs/`` tree is portable. Writes go through a tempfile + ``os.replace``
+    for atomicity (``os.replace`` swaps the symlink in one syscall).
+
+    Returns the symlink path.
+    """
+    parent = work_dir.parent  # outputs/<uid>
+    target = work_dir.name    # e.g. "00" — relative, not absolute
+    final = parent / 'latest'
+    tmp = parent / f'.latest.{os.getpid()}'
+    # Clean up any stale tmp from a prior crashed run.
+    if tmp.is_symlink() or tmp.exists():
+        tmp.unlink()
+    os.symlink(target, tmp)
+    os.replace(tmp, final)  # atomic swap
+    return final
+
+
+def _update_meta(work_dir: Path, *, last_completed_step: str, verdict: Optional[str]) -> None:
+    """Update ``<work_dir>/_meta.json`` after a successful step.
+
+    Best-effort: a missing or unreadable _meta.json is logged but does not
+    fail the audit. The file was created by ``allocate_attempt.py``; if it's
+    gone, the work directory was constructed by hand or _meta got deleted —
+    rare enough that we don't fight for it.
+    """
+    meta_path = work_dir / '_meta.json'
+    try:
+        meta = json.loads(meta_path.read_text(encoding='utf-8'))
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        print(
+            f'⚠️  could not update {meta_path}: {e} '
+            f'(continuing — meta is bookkeeping only)',
+            file=sys.stderr,
+        )
+        return
+    meta['last_completed_step'] = last_completed_step
+    meta['verdict'] = verdict
+    meta['completed_at'] = datetime.now(timezone.utc).isoformat()
+    meta_path.write_text(json.dumps(meta, indent=2) + '\n', encoding='utf-8')
 
 
 def write_bq(row: Dict[str, Any]) -> None:
@@ -561,34 +608,82 @@ def write_bq(row: Dict[str, Any]) -> None:
         raise RuntimeError(f'BQ insert failed: {errors} (row backed up to {backup})')
 
 
+def _load_work_dir_inputs(work_dir: Path) -> Dict[str, Any]:
+    """Read the three YAMLs that drive the report from a per-attempt work directory.
+
+    Expected layout (created by allocate_attempt.py + Steps 1–3 of the
+    seller-audit pipeline):
+
+        <work_dir>/applicant.yaml        # Step 1 output (BQ → YAML)
+        <work_dir>/investigation.yaml    # Step 2 output (investigate; self-validated)
+        <work_dir>/verdict.yaml          # Step 3 input authored by the verdict
+                                         # subagent — top-level fields ARE the
+                                         # assessment itself (verdict, tier, risk,
+                                         # *_justification, investigation_steps,
+                                         # special_notes).
+
+    Returns a dict with top-level keys ``applicant``, ``investigation``,
+    ``assessment`` for downstream rendering.
+    """
+    applicant_path = work_dir / 'applicant.yaml'
+    investigation_path = work_dir / 'investigation.yaml'
+    verdict_path = work_dir / 'verdict.yaml'
+
+    missing = [
+        p.name for p in (applicant_path, investigation_path, verdict_path)
+        if not p.exists()
+    ]
+    if missing:
+        raise RuntimeError(
+            f'work_dir {work_dir} is missing required artifacts: {missing}. '
+            f'Expected applicant.yaml (Step 1), investigation.yaml (Step 2), and '
+            f'verdict.yaml (Step 3).'
+        )
+
+    applicant = yaml.safe_load(applicant_path.read_text(encoding='utf-8'))
+    investigation = yaml.safe_load(investigation_path.read_text(encoding='utf-8'))
+    verdict = yaml.safe_load(verdict_path.read_text(encoding='utf-8'))
+
+    if not isinstance(verdict, dict):
+        raise RuntimeError(
+            f'{verdict_path}: top-level must be a YAML mapping with the '
+            f'assessment fields (verdict, tier, risk, ...). Got '
+            f'{type(verdict).__name__}.'
+        )
+
+    return {
+        'applicant': applicant,
+        'investigation': investigation,
+        'assessment': verdict,
+    }
+
+
 def main():
-    parser = argparse.ArgumentParser(description='Render verdict report from handoff + assessment')
-    parser.add_argument('input_file', nargs='?', help='Input JSON or YAML file')
-    parser.add_argument('--format', choices=['json', 'yaml'], default='json', help='Input format')
-    # Treat `--input -` (or `--input <path>`) as an alias for stdin/file so the
-    # SKILL.md example call keeps working verbatim.
-    parser.add_argument('--input', dest='input_alias', help='Input file path, or "-" for stdin')
-    parser.add_argument('--no-md', action='store_true', help='Skip writing outputs/audit_{vid}.md')
+    parser = argparse.ArgumentParser(
+        description='Render the audit report from a per-attempt work directory. '
+        'Reads applicant.yaml + investigation.yaml + verdict.yaml, writes '
+        'audit.md, INSERTs a row into BigQuery, refreshes the outputs/<uid>/latest '
+        'symlink, and updates _meta.json — all three side effects are required '
+        'for a successful audit. Use --no-md / --no-bq to skip pieces during '
+        'local debugging.'
+    )
+    parser.add_argument(
+        '--work-dir',
+        type=Path,
+        required=True,
+        help='Per-attempt work directory (e.g. outputs/<uid>/<NN>). The script '
+        'reads applicant.yaml + investigation.yaml + verdict.yaml from this '
+        'directory, writes audit.md to this directory, refreshes the '
+        'outputs/<uid>/latest symlink, and updates _meta.json on success.',
+    )
+    parser.add_argument('--no-md', action='store_true', help='Skip writing audit.md')
     parser.add_argument('--no-bq', action='store_true', help=f'Skip INSERT into {BQ_TABLE_FQN}')
-    parser.add_argument('--vid', help='Override vid (defaults to handoff.seller.hubspot_id)')
+    parser.add_argument('--vid', help='Override vid (defaults to applicant.seller.hubspot_id)')
 
     args = parser.parse_args()
 
-    # Resolve input source: positional > --input > stdin
-    src = args.input_file or args.input_alias
-
-    if src and src != '-':
-        with open(src, 'r') as f:
-            if args.format == 'yaml' or src.endswith('.yaml') or src.endswith('.yml'):
-                data = yaml.safe_load(f)
-            else:
-                data = json.load(f)
-    else:
-        content = sys.stdin.read()
-        try:
-            data = json.loads(content)
-        except json.JSONDecodeError:
-            data = yaml.safe_load(content)
+    work_dir = args.work_dir.resolve()
+    data = _load_work_dir_inputs(work_dir)
 
     report = render_report(data)
     print(report)
@@ -608,8 +703,7 @@ def main():
             return
 
         if not args.no_md:
-            # PalmStreet uid only — build_row() guarantees it's present.
-            md_path = write_md(row['user_id'], report)
+            md_path = write_md(work_dir / 'audit.md', report)
             print(f'✓ wrote {md_path}', file=sys.stderr)
 
         if not args.no_bq:
@@ -620,19 +714,17 @@ def main():
                 print(f'✗ BQ insert failed: {e}', file=sys.stderr)
                 sys.exit(2)
 
+        # Refresh latest symlink + meta only on full success. We reach this
+        # point only when the requested side effects (md / BQ) all succeeded
+        # — so updating _meta to "verdict completed" is honest.
+        symlink_path = _update_latest_symlink(work_dir)
+        print(f'✓ refreshed {symlink_path} → {work_dir.name}', file=sys.stderr)
+        _update_meta(
+            work_dir,
+            last_completed_step='verdict',
+            verdict=row['verdict'],
+        )
+
 
 if __name__ == '__main__':
-    # Try to import yaml, fallback to basic YAML parsing if not available
-    try:
-        import yaml
-    except ImportError:
-        # Minimal YAML support
-        class SimpleYAML:
-            @staticmethod
-            def safe_load(f):
-                import json
-                return json.load(f)
-
-        yaml = SimpleYAML()
-
     main()

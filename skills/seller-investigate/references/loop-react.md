@@ -83,7 +83,7 @@ Visit every normalized URL from the application using Claude in Chrome. For each
 4. Extract metrics: followers, sales, reviews, product count, location
 5. Note any external links found (Bio, About section, Linktree links) → add to `secondary_links_found`
 6. Assess if content matches the claimed business category
-7. Load the corresponding `references/scrape-*.md` for structured data extraction
+7. Load the corresponding `scrape-*.md` (sibling file in this skill's `references/`) for structured data extraction
 
 For social media profiles, evaluate:
 - Is the content about selling plants/jewelry/beauty/etc., or is it a personal life account?
@@ -129,7 +129,7 @@ When in doubt, do NOT assume a Google result belongs to the seller. It is better
 - If a result page looks relevant (matching name/username + category), visit it in Chrome and extract data
 - If 3 searches yield no relevant results, STOP — this confirms zero footprint
 - Do NOT construct platform URLs (e.g., do not manually build `instagram.com/{username}` or `poshmark.com/closet/{username}`) — only follow links that Google returns
-- ALL pages discovered via Google Search MUST be tagged with `Attribution: "Found via Google Search"` in the report (Section 2.5.5 and Section 3.3 Part 2), and include an identity match assessment (Strong / Weak / No match)
+- ALL pages discovered via Google Search MUST be tagged with `attribution: "found_via_websearch"` in the corresponding `platforms[]` entry (per the investigation schema), and include an identity match assessment in `risks` (e.g., `"identity_match: weak"` or `"identity_match: strong"`).
 
 **After completing P3**, if all provided P1 URLs were invalid and P3 also found nothing, set `all_provided_urls_invalid = true`. Return to REASON phase.
 
@@ -159,13 +159,13 @@ When the investigation cannot proceed due to systemic failures (not just dead UR
 - Chrome browser is unavailable AND all provided URLs require Chrome visits
 - HubSpot record contains zero URLs, zero social media, and zero identifying information beyond name/email
 
-**Output:** Produce a truncated report using the standard template (Section 3.3 format in output-format.md) with:
-- Verdict: **REVIEW**
-- Tier: **N/A**
-- Risk: **N/A**
-- Action: "Audit incomplete — [specific reason]. Manual follow-up required."
-- Summary: Explain what was attempted and why the audit could not be completed
-- Investigation Steps: Document each attempted action and its failure reason
+**Output:** Emit a normal investigation YAML with these fields signaling the unable-to-audit state — it is the verdict subagent's job (not yours) to render the user-facing report from this signal:
+- `investigation_summary.early_exit_reason` — start with the literal prefix `"unable_to_audit:"` followed by the specific cause (e.g., `"unable_to_audit: BQ down + HubSpot UI inaccessible"`).
+- `investigation_summary.actual_category` — `null` (you observed nothing).
+- `investigation_summary.total_platforms_checked` / `_active` — set to whatever you actually attempted (often 0).
+- `platforms[]` — include attempted-but-failed entries with their failure status (404, login_blocked, etc.) and a brief `risks` note explaining the failure mode. If you attempted nothing, leave the array empty.
+
+The verdict subagent reads the `unable_to_audit:` prefix and produces the truncated REVIEW report with N/A tier/risk. Do NOT hand-write any markdown report from this skill — your contract ends at the investigation YAML (after self-validation).
 
 Do NOT default to REJECT when the issue is data availability rather than seller quality.
 

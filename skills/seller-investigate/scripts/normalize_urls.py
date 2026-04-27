@@ -367,8 +367,7 @@ def process_urls(raw_urls: List[str]) -> List[Dict[str, Any]]:
                 'needs_seller_extraction': False,
                 # The identifier (username/shop/numeric id) that the visited
                 # page MUST match. Carried through to verify_url_integrity.py
-                # so verification is a single batch call after Chrome visits,
-                # not a per-URL --original/--visited round-trip.
+                # so verification is a single batch call after Chrome visits.
                 'expected_identifier': None,
             }
 

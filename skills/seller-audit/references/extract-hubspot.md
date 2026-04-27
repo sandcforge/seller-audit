@@ -10,7 +10,7 @@ The script queries `plantstory.hubspot.Contact` in BigQuery via sandbox `gcloud`
 
 ### 1.1 Location
 
-The seller-extract skill uses one script:
+The seller-audit orchestrator runs one script inline (Step 1 of `skills/seller-audit/SKILL.md`):
 
 ```
 skills/seller-audit/scripts/bq_query_seller.py  # uid → Applicant Summary YAML (stdout only)
@@ -137,7 +137,7 @@ Fields to capture (same set as Method 1 1.4):
 
 ## Output: Applicant Summary YAML
 
-Regardless of method, organize extracted data into the YAML structure below before handing off to seller-investigate. Field names match the downstream `handoff-schema.md` where they overlap, so investigate can copy identity fields through without translation.
+Regardless of method, organize extracted data into the YAML structure below before handing off to seller-investigate. Field names match the downstream `schema-investigation.md` where they overlap, so investigate can copy identity fields through without translation.
 
 ### Schema
 
@@ -146,7 +146,7 @@ seller:
   name: string                    # "First Last" — combined firstname + lastname
   company: string or null         # Company name if different from personal name
   hubspot_id: string              # VId — used for the HubSpot URL and BQ vid column
-  palmstreet_userid: string or null  # palmstreet_userid field. REQUIRED downstream by render_verdict.py — flag to user if missing.
+  palmstreet_userid: string or null  # palmstreet_userid field. REQUIRED downstream by generate_report.py — flag to user if missing.
   palmstreet_username: string or null  # palmstreet_username field
   email: string
   phone: string or null
@@ -168,11 +168,11 @@ business_claims:
 
 ### Rules
 
-1. **Every field must be present.** Use `null` for unknown values, `[]` for empty arrays — never omit a field. Same discipline as `handoff-schema.md`.
+1. **Every field must be present.** Use `null` for unknown values, `[]` for empty arrays — never omit a field. Same discipline as `schema-investigation.md`.
 2. **Numbers are numbers, not strings.** `inventory_count: 200`, not `"200"`. `average_price: 35.00`, not `"$35"`.
 3. **URLs are full `https://` form** (no bare domains). If HubSpot stored only `instagram.com/foo`, expand to `https://www.instagram.com/foo`.
 4. **`business_claims.category` is a single string.** If HubSpot has multiple Typeform categories, join with `" / "` (e.g. `"Plants / Crystals"`) so investigate's category-mismatch check sees the full claim.
-5. **Do not invent fields.** If HubSpot has no `palmstreet_userid`, emit `null` and surface the gap to the orchestrator — render_verdict.py will hard-error later, so it's better to stop here.
+5. **Do not invent fields.** If HubSpot has no `palmstreet_userid`, emit `null` and surface the gap to the orchestrator — generate_report.py will hard-error later, so it's better to stop here.
 6. **`business_claims.referred_by` is a COALESCE.** Prefer the BQ `referred_by` column; fall back to `referring_friend` only when `referred_by` is null/empty. Never emit both — downstream consumes a single `referred_by` field. If both are populated and disagree, trust `referred_by` (it's the newer Typeform field; `referring_friend` is the legacy column with more noise like `'n/a'` / `'Yes, a friend! '`).
 
 ### Example

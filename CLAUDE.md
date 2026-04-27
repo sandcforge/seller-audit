@@ -18,4 +18,4 @@ When the user asks to audit, review, verify, or investigate a seller — or drop
 
 **The skill takes a PalmStreet uid (`palmstreet_userid`) as its input.** If the user gave you anything else — email, name, username, phone, HubSpot contact link, HubSpot VId — first run `python scripts/bq_seller.py --query "<term>"` to resolve it. Column 1 of stdout is the uid; pipe that into the seller-audit skill. `bq_seller.py` is a standalone lookup tool, not part of any skill.
 
-The skill handles **one seller per invocation**. If the user asks to audit multiple sellers, invoke the skill once per seller and produce one verdict `.md` file each — never bundle multiple sellers into one combined report.
+**One seller per invocation, sequentially.** For multiple sellers, invoke the skill once per uid and produce one verdict `.md` each — never bundle them into one report, never run them concurrently or via parallel subagents.

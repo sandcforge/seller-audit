@@ -1,17 +1,9 @@
-# General Category SOP (Fallback)
-
+# General Category SOP — Verdict Decision
 **TRIGGER:** Apply when category does not match Plants, Shiny, Beauty, or Collectibles.
 
 ---
 
-## PART A: Investigation Data Points
-
-No category-specific investigation rules. Use the general investigation protocols from the main SKILL.md — focus on: identity verification, inventory reality, sales history, social credibility, and risk signals (dropshipping, fraud, China connection).
-
----
-
-## PART B: Verdict Decision
-
+## Verdict Decision
 ### STEP 1: Tier Classification
 
 | Tier | Volume | Presentation | Maturity |

@@ -103,58 +103,48 @@ def verify_url_pair(
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Verify URL integrity by comparing identifiers')
-    parser.add_argument('--original', help='Original URL')
-    parser.add_argument('--visited', help='Visited/resolved URL')
-    parser.add_argument('--batch', action='store_true', help='Batch mode: read JSON array from stdin')
-    parser.add_argument('--input', help='Input JSON file')
+    parser = argparse.ArgumentParser(
+        description='Verify URL integrity in batch. Reads a JSON array of '
+        'normalize_urls.py-shaped entries from stdin (or --input <file>), each '
+        'augmented with a `visited` URL captured during the Chrome step. '
+        'Prints a JSON array of per-entry verification results to stdout.'
+    )
+    parser.add_argument('--input', help='Input JSON file (default: stdin)')
 
     args = parser.parse_args()
 
-    if args.batch or (not args.original and not args.visited):
-        # Batch mode
-        if args.input:
-            with open(args.input, 'r') as f:
-                data = json.load(f)
-        else:
-            data = json.load(sys.stdin)
-
-        if not isinstance(data, list):
-            data = [data]
-
-        results = []
-        for item in data:
-            if isinstance(item, dict):
-                # Skip junk entries piped straight from normalize_urls.py —
-                # they were never visited, so there's nothing to verify.
-                if item.get('is_junk'):
-                    continue
-                # Find the visited URL. Accept either 'visited' (the natural
-                # name) or 'visited_url' (some callers may already use that
-                # key). If neither is present, skip silently — the entry is
-                # still pre-visit.
-                visited = item.get('visited') or item.get('visited_url')
-                if not visited:
-                    continue
-                # Original URL: prefer 'original'; fall back to 'normalized'
-                # so a normalize_urls.py result piped through directly still
-                # works without renaming.
-                original = item.get('original') or item.get('normalized') or ''
-                expected = item.get('expected_identifier')
-                result = verify_url_pair(original, visited, expected_identifier=expected)
-                results.append(result)
-
-        print(json.dumps(results, indent=2))
+    if args.input:
+        with open(args.input, 'r') as f:
+            data = json.load(f)
     else:
-        # Single pair mode
-        if not args.original or not args.visited:
-            print(json.dumps({
-                'error': 'Must provide --original and --visited, or use --batch mode'
-            }), file=sys.stderr)
-            sys.exit(1)
+        data = json.load(sys.stdin)
 
-        result = verify_url_pair(args.original, args.visited)
-        print(json.dumps(result, indent=2))
+    if not isinstance(data, list):
+        data = [data]
+
+    results = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        # Skip junk entries piped straight from normalize_urls.py — they were
+        # never visited, so there's nothing to verify.
+        if item.get('is_junk'):
+            continue
+        # Find the visited URL. Accept either 'visited' (the natural name) or
+        # 'visited_url' (some callers may already use that key). If neither is
+        # present, skip silently — the entry is still pre-visit.
+        visited = item.get('visited') or item.get('visited_url')
+        if not visited:
+            continue
+        # Original URL: prefer 'original'; fall back to 'normalized' so a
+        # normalize_urls.py result piped through directly still works without
+        # renaming.
+        original = item.get('original') or item.get('normalized') or ''
+        expected = item.get('expected_identifier')
+        result = verify_url_pair(original, visited, expected_identifier=expected)
+        results.append(result)
+
+    print(json.dumps(results, indent=2))
 
 
 if __name__ == '__main__':

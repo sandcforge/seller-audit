@@ -1,6 +1,6 @@
 ---
 name: seller-verdict
-description: "Issue a final APPROVE/REJECT/REVIEW verdict for a PalmStreet seller based on structured investigation data. This is the Verdict Agent component of the seller audit pipeline. Receives handoff YAML from seller-investigate, applies category-specific SOP rules, and produces a formatted Markdown report. Does NOT use Chrome or visit URLs. Typically invoked by the seller-audit orchestrator."
+description: "Issue a final APPROVE/REJECT/REVIEW verdict for a PalmStreet seller based on structured investigation data. This is the Verdict Agent component of the seller audit pipeline. Receives investigation YAML from seller-investigate, applies category-specific SOP rules, and produces a formatted Markdown report. Does NOT use Chrome or visit URLs. Typically invoked by the seller-audit orchestrator."
 ---
 
 # Seller Verdict (Verdict Agent)
@@ -9,32 +9,32 @@ Receive structured investigation data, apply SOP verdict logic, and produce a fo
 
 ## Role Boundaries
 
-- **DO:** Read handoff YAML, apply SOP Part B, classify tier/risk, look up decision matrix, generate report
-- **DO NOT:** Use Chrome, visit URLs, read scraping guides, read SOP Part A, or do any investigation
+- **DO:** Read investigation YAML, apply your category SOP (`references/sop-{category}.md` — verdict decision rules), classify tier/risk, look up decision matrix, generate report
+- **DO NOT:** Use Chrome, visit URLs, read seller-investigate's references (scrape-*.md, loop-react.md, sop-*.md investigation SOPs, url-normalization.md), or do any investigation
 
-## Input
+## Input (read by file path)
 
-Structured YAML from seller-investigate, following the schema in:
-> `../seller-audit/references/handoff-schema.md`
+The orchestrator passes you a **work directory path** (e.g. `outputs/<uid>/<NN>/`). Read your inputs from disk:
 
-Verify `sop_applied` matches the actual category before proceeding.
+- **`<work_dir>/applicant.yaml`** — Applicant Summary YAML produced by Step 1. Top-level keys: `seller`, `online_assets`, `business_claims`. Used for the category-mismatch check and as the source of identity / claimed numbers.
+- **`<work_dir>/investigation.yaml`** — Observed-data investigation produced by Step 2 (seller-investigate). Schema in `../seller-audit/references/schema-investigation.md`. The investigator self-validates this file against the schema before returning, so you can trust the structural shape — focus on interpreting the content.
 
-## Step 1: Load Category SOP (Part B Only)
+Use the `Read` tool to load both files. Verify `investigation.investigation_summary.sop_applied` matches the actual category before proceeding.
 
-Based on `handoff.investigation_summary.actual_category` (what was observed across storefronts — NOT the applicant's claim, which is fetched separately from BQ), read Part B (Verdict Decision) of the relevant SOP:
-- Plants / Flowers / Gardening → `../seller-audit/references/sop-plants.md` Part B
-- Jewelry / Coins / Crystals → `../seller-audit/references/sop-shiny.md` Part B
-- Beauty / Makeup / Skincare → `../seller-audit/references/sop-beauty.md` Part B
-- Collectibles / Trading Cards → `../seller-audit/references/sop-collectibles.md` Part B
-- All other → `../seller-audit/references/sop-general.md` Part B
+## Step 1: Load Category SOP (verdict decision rules)
 
-**Do NOT read Part A** — that was for the Scraper Agent.
+Based on `investigation.investigation_summary.actual_category` (what was observed across storefronts — NOT the applicant's claim, which is fetched separately from BQ), read this skill's verdict SOP. Each file is scoped to verdict only — the matching investigation data points live in seller-investigate's references and are not your concern.
+- Plants / Flowers / Gardening → `references/sop-plants.md`
+- Jewelry / Coins / Crystals → `references/sop-shiny.md`
+- Beauty / Makeup / Skincare → `references/sop-beauty.md`
+- Collectibles / Trading Cards → `references/sop-collectibles.md`
+- All other → `references/sop-general.md`
 
-If you are reading a Part B file, confirm the seller's actual category matches. If not, STOP and load the correct SOP.
+Confirm the seller's actual category matches the SOP you opened. If not, STOP and load the correct one.
 
 ## Step 2: Classify Tier
 
-Apply the SOP's tier classification rules using metrics from the handoff YAML:
+Apply the SOP's tier classification rules using metrics from the investigation YAML:
 - `investigation_summary.total_followers` for follower-based tiers
 - `investigation_summary.total_items_sold` for sales-based tiers
 - Platform-specific metrics from `platforms[]` entries
@@ -50,86 +50,90 @@ Apply the SOP's risk assessment rules. Use:
 - `platforms[].risks` — per-platform risk signals
 - Category-specific risk criteria from the SOP
 
-## Step 4: Render Verdict (MANDATORY — script path only)
+## Step 4: Render Report (MANDATORY — script path only)
 
-**You MUST run `render_verdict.py`. Do NOT hand-write the Markdown report.**
+**You MUST run `generate_report.py --work-dir <work_dir>`. Do NOT hand-write the Markdown report.**
 
-This step has two equally required deliverables:
-1. The Markdown report at `outputs/audit_<palmstreet_userid>.md`
+This step has THREE equally required deliverables, all produced by one script call:
+1. `<work_dir>/audit.md` — the Markdown report
 2. An INSERT into the BigQuery table `plantstory.risk_control.seller_application_audit`
+3. `outputs/<uid>/latest` symlink refreshed to point at this attempt + `<work_dir>/_meta.json` updated with `completed_at`, `last_completed_step: "verdict"`, and `verdict`
 
-`render_verdict.py` does **both** in one call. If you skip the script and write the `.md` yourself, the BQ row is silently lost and the audit is incomplete — even if the local file looks fine. There is no manual workaround for the BQ insert; only the script writes that row.
+If you skip the script and write the `.md` yourself, all three side effects are silently lost and the audit is incomplete — even if the local file looks fine. There is no manual workaround for the BQ insert; only the script writes that row, and only the script refreshes the symlink.
 
-### How to invoke (use `--input <path>`, NOT `echo | stdin`)
+### How to invoke
 
-**Always write the input to a file first, then pass the path.** Piping JSON
-through `echo '...' | python ... --input -` looks convenient but breaks on
-quoting — single-quotes inside the JSON, multi-line values, and nested arrays
-all turn into shell parsing failures. Reaching for stdin is the #1 reason
-this step gets retried.
+**Write your assessment to `<work_dir>/verdict.yaml`, then call the script with `--work-dir`.** The script reads `applicant.yaml` + `investigation.yaml` + `verdict.yaml` from the same directory automatically — your only output is `verdict.yaml`.
 
+`verdict.yaml` top-level fields ARE the assessment itself — there is NO outer `assessment:` wrapper.
+
+Step 1 — compose the assessment as a Python dict:
 ```python
-# 1. Compose the input as a Python dict and serialize it cleanly:
-import json
-input_data = {
-    "handoff": {...},      # paste the slim handoff dict
-    "assessment": {
-        "verdict": "APPROVE",                # or REJECT / REVIEW — see Step 5 below
-        "tier": "A",                          # S / A / B / F
-        "risk": "LOW",                        # HIGH / MEDIUM / LOW
-        "category_used": "general",           # plants / shiny / beauty / collectibles / general
-        # Each justification field accepts EITHER a single string (legacy —
-        # rendered as one bullet) OR a list of 1–3 strings (preferred —
-        # rendered as separate bullets under the Conclusion heading). Lists
-        # longer than 3 are truncated to 3. Keep each bullet short and
-        # standalone (one fact / signal / threshold).
-        "tier_justification": [
-            "2,000 items sold with 5.0 rating across 185 reviews exceeds the >500-sold Professional threshold.",
-            "<1d average ship time and consistent branding (Whatnot @jessnelson77 ↔ TikTok @fitlifejess) reinforce the tier.",
-        ],
-        "risk_justification": [
-            "No fraud signals: matching email, cross-platform identity, authentic lifestyle content.",
-            "No dropshipping or China-connection indicators.",
-        ],
-        "verdict_justification": [           # optional bullets under Final Verdict
-            "A-tier seller with low risk → APPROVE under SOP-General Part B.",
-        ],
-        "investigation_steps": [
-            # Each step MUST use these exact keys. `body` / `description` etc.
-            # will silently disappear from the rendered report.
-            {
-                "heading": "Whatnot Profile Verification",
-                "url": "https://www.whatnot.com/user/jessnelson77",
-                "status": "active",                  # active | 404 | login_blocked | private | evaluated
-                "findings": "1–3 sentences describing what was observed on this page.",
-                "signals": [
-                    "What this finding tells us (positive or negative)",
-                    "Multiple signals are fine"
-                ]
-            },
-            # ... more steps
-        ],
-        "special_notes": "..."                # optional — actions / escalation / context
-    }
+assessment = {
+    "verdict": "APPROVE",                # or REJECT / REVIEW — see Step 5 below
+    "tier": "A",                          # S / A / B / F
+    "risk": "LOW",                        # HIGH / MEDIUM / LOW
+    "category_used": "general",           # plants / shiny / beauty / collectibles / general
+    # Each justification field accepts EITHER a single string (rendered
+    # as one bullet) OR a list of 1–3 strings (rendered as separate
+    # bullets under the Conclusion heading). A list of 1–3 short bullets
+    # reads best. Lists longer than 3 are truncated to 3. Keep each
+    # bullet short and standalone (one fact / signal / threshold).
+    "tier_justification": [
+        "2,000 items sold with 5.0 rating across 185 reviews exceeds the >500-sold Professional threshold.",
+        "<1d average ship time and consistent branding (Whatnot @jessnelson77 ↔ TikTok @fitlifejess) reinforce the tier.",
+    ],
+    "risk_justification": [
+        "No fraud signals: matching email, cross-platform identity, authentic lifestyle content.",
+        "No dropshipping or China-connection indicators.",
+    ],
+    "verdict_justification": [           # optional bullets under Final Verdict
+        "A-tier seller with low risk → APPROVE under the general-category SOP.",
+    ],
+    "investigation_steps": [
+        # Each step MUST use these exact keys. `body` / `description` etc.
+        # will silently disappear from the rendered report.
+        {
+            "heading": "Whatnot Profile Verification",
+            "url": "https://www.whatnot.com/user/jessnelson77",
+            "status": "active",                  # active | 404 | login_blocked | private | evaluated
+            "findings": "1–3 sentences describing what was observed on this page.",
+            "signals": [
+                "What this finding tells us (positive or negative)",
+                "Multiple signals are fine"
+            ]
+        },
+        # ... more steps
+    ],
+    "special_notes": "..."                # optional — actions / escalation / context
 }
-
-# 2. Write to outputs/ (use the Write tool, not heredocs):
-input_path = f"outputs/verdict_input_{palmstreet_userid}.json"
-# Write tool → input_path with json.dumps(input_data, indent=2)
-
-# 3. Then run:
-#    python skills/seller-verdict/scripts/render_verdict.py --input outputs/verdict_input_<uid>.json
 ```
 
-After the call, verify both side effects in stderr:
-- `✓ wrote .../outputs/audit_<uid>.md`
-- `✓ inserted row into plantstory.risk_control.seller_application_audit (vid=<vid>)`
+Step 2 — write `verdict.yaml` to the work directory using the `Write` tool (NOT heredocs / `echo` — quoting will fail):
+```python
+# Path: <work_dir>/verdict.yaml
+# Content: yaml.safe_dump(assessment, sort_keys=False, allow_unicode=True)
+# IMPORTANT: top-level fields are the assessment fields themselves —
+# do NOT wrap in `{"assessment": assessment}`.
+```
 
-If either confirmation is missing, the step is NOT complete — do not report success to the orchestrator. Re-run after fixing the underlying error (most often a missing `palmstreet_userid`, a missing/invalid `verdict`, or a malformed `assessment` payload).
+Step 3 — run the script:
+```bash
+python skills/seller-verdict/scripts/generate_report.py --work-dir <work_dir>
+```
+
+After the call, verify all THREE side effects in stderr:
+- `✓ wrote .../audit.md`
+- `✓ inserted row into plantstory.risk_control.seller_application_audit (vid=<vid>)`
+- `✓ refreshed .../latest → <NN>`
+
+If any confirmation is missing, the step is NOT complete — do not report success to the orchestrator. Re-run after fixing the underlying error (most often a missing/invalid `verdict`, a malformed `verdict.yaml`, or a missing `applicant.yaml`/`investigation.yaml` in the work directory).
 
 The script:
+- Reads `applicant.yaml` + `investigation.yaml` + `verdict.yaml` from the work directory
 - Renders the Markdown report (Conclusion + Investigation Steps)
-- Writes the .md and inserts the BQ row
+- Writes the .md to the work directory and inserts the BQ row
+- Refreshes `outputs/<uid>/latest` symlink and updates `_meta.json` on success
 - Warns if the report exceeds 90 lines
 - Does NOT apply decision logic — that is your job
 
@@ -143,8 +147,9 @@ past — fix in your assessment JSON, do not work around them:
 |---|---|---|
 | `assessment.verdict is required` | You forgot the field, or set it to `null`/`""` | Add `"verdict": "APPROVE"` (or REJECT / REVIEW). Pick exactly one. |
 | `assessment.verdict must be one of ('APPROVE','REJECT','REVIEW'); got 'ESCALATE_TO_MADDY'` (or similar) | You used a routing tag as the verdict | The verdict is tri-state. Move the routing tag into `special_notes` (see table below). |
-| `palmstreet_userid is required in handoff.seller` | The handoff is missing the join key | Add `seller.palmstreet_userid` to the handoff. The script needs it to refetch the applicant from BQ. |
-| `bq_query_seller.py failed for uid=...` | uid doesn't exist in HubSpot or BQ permissions issue | Verify the uid exists via `python scripts/bq_seller.py --query "<known email>"`. If correct, check ADC creds. |
+| `palmstreet_userid is required in investigation.seller` | The investigation is missing the join key | Add `seller.palmstreet_userid` to the investigation. The script uses it to derive the BQ row's `user_id` column and as the audit filename root. |
+| `work_dir <path> is missing required artifacts` | One of `applicant.yaml`, `investigation.yaml`, or `verdict.yaml` is not in the work directory | Step 1 should have written `applicant.yaml`; Step 2 should have written `investigation.yaml`; you should have just written `verdict.yaml`. Re-check the work directory listing before running the script. |
+| `bq_query_seller.py failed for uid=...` | uid doesn't exist in HubSpot, or BQ permissions issue | Verify the uid exists via `python scripts/bq_seller.py --query "<known email>"`. If correct, check ADC creds. |
 
 **Routing tags belong in `special_notes`, not in `verdict`.** Common cases:
 
@@ -164,23 +169,24 @@ of APPROVE/REJECT/REVIEW?" — if not, it's `special_notes` material.
 
 **Escape hatches (rarely needed — the normal flow above does NOT use any of these):**
 - `--vid <vid>` overrides the BQ insert's `vid` column. Defaults to `applicant.seller.hubspot_id`. Use only when you need to insert under a different vid (e.g. cleaning up a row that was originally inserted with a wrong vid).
-- `--no-md` skips writing `outputs/audit_<palmstreet_userid>.md`. Use when you only want the BQ row, not the local markdown.
+- `--no-md` skips writing `<work_dir>/audit.md`. Use when you only want the BQ row, not the local markdown.
 - `--no-bq` skips the INSERT into `plantstory.risk_control.seller_application_audit`. ONLY for dry runs explicitly requested by the user. Default audits MUST persist to BQ.
 
-The report format is specified in `../seller-audit/references/output-format.md` — that document is for reference only. Do NOT use it as a recipe to hand-write the report; always go through the script.
+The report format is specified in `references/output-format.md` — that document is for reference only. Do NOT use it as a recipe to hand-write the report; always go through the script.
 
 ## General Rules
 
 1. **Total followers:** Sum across ALL platforms. Do not evaluate each in isolation.
-2. **User-provided data:** Applicant-claimed data (`inventory_count`, `average_price`, etc.) is fetched from BigQuery at verdict time — `render_verdict.py` resolves it from the Applicant Summary YAML keyed off `handoff.seller.palmstreet_userid`. The handoff itself does NOT carry these fields.
-3. **Category mismatch:** Compare `handoff.investigation_summary.actual_category` (what was observed) against the applicant's claimed category (refetched from BQ). Use the ACTUAL category's SOP, not the claimed one. Flag the mismatch in `special_notes`.
+2. **User-provided data:** Applicant-claimed data (`inventory_count`, `average_price`, etc.) is read by `generate_report.py` from `<work_dir>/applicant.yaml` (the file written by Step 1 of the orchestrator). The investigation itself does NOT carry these fields.
+3. **Category mismatch:** Compare `investigation.investigation_summary.actual_category` (what was observed) against the applicant's claimed category (refetched from BQ). Use the ACTUAL category's SOP, not the claimed one. Flag the mismatch in `special_notes`.
 4. **Collectibles:** NEVER reject outright. Downgrade all would-be REJECTs to REVIEW.
 5. **raw_metrics_text sanity check:** Before finalizing tier, spot-check a few `raw_metrics_text` entries against their parsed metric values. If "1.5K" was parsed as 15000, fix it.
-6. **No hallucinated numbers.** Every quantitative claim in the report ("Audited N platforms", "M followers", "K items sold", etc.) must trace back to a specific field in the handoff YAML. Do NOT recompute counts from the investigator's prose narrative or `early_exit_reason`. In particular: "Audited N platforms with M active" must use `investigation_summary.total_platforms_checked` and `total_platforms_active` verbatim — nothing else. If those fields contradict the narrative, trust the fields and note the discrepancy in Special Notes.
+6. **No hallucinated numbers.** Every quantitative claim in the report ("Audited N platforms", "M followers", "K items sold", etc.) must trace back to a specific field in the investigation YAML. Do NOT recompute counts from the investigator's prose narrative or `early_exit_reason`. In particular: "Audited N platforms with M active" must use `investigation_summary.total_platforms_checked` and `total_platforms_active` verbatim — nothing else. If those fields contradict the narrative, trust the fields and note the discrepancy in Special Notes.
 7. **Null is not zero.** If `total_followers` or `total_items_sold` is `null`, report it as "not observed" or omit the claim — do not render as "0 followers" or "0 sales", which implies a negative signal that wasn't actually measured.
-8. **Verdict lives in the Conclusion section, not as a final step.** The report is structured as Conclusion (Final Verdict / Special Notes / Quality Tier / Risk Level — in that numbered order) → Investigation Steps. Do NOT append a `Step N — Verdict: Apply [Category] SOP` row at the end of Investigation Steps — that pattern is deprecated. `render_verdict.py` produces this layout automatically.
+8. **Verdict lives in the Conclusion section, not as a final step.** The report is structured as Conclusion (Final Verdict / Special Notes / Quality Tier / Risk Level — in that numbered order) → Investigation Steps. Do NOT append a `Step N — Verdict: Apply [Category] SOP` row at the end of Investigation Steps — that pattern is deprecated. `generate_report.py` produces this layout automatically.
+9. **UNABLE_TO_AUDIT signal.** If `investigation.investigation_summary.early_exit_reason` starts with the literal prefix `"unable_to_audit:"`, the investigation could not proceed (BQ + HubSpot UI both down, Chrome unavailable, zero usable input data, etc.). In that case: emit `verdict: REVIEW`, set `tier` and `risk` to `"N/A"`, and put the reason verbatim into `special_notes` along with `"Audit incomplete — manual follow-up required."`. Do NOT default to REJECT just because there are no platforms — the failure mode is data availability, not seller quality.
 
 ## Decision Shortcuts
 
 For common patterns that speed up verdict, read:
-> `../seller-audit/references/shortcuts.md`
+> `references/shortcuts.md`

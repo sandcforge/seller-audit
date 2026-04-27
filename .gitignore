@@ -12,9 +12,7 @@ AGENTS.md
 
 # Secrets
 skills/seller-audit/assets/bq-reader-key.json
-skills/seller-extract/assets/bq-reader-key.json
 !skills/seller-audit/assets/.gitkeep
-!skills/seller-extract/assets/.gitkeep
 
 # Generated outputs and audit artifacts
 outputs/*

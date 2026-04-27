@@ -19,7 +19,7 @@
 
 1. Record the mismatch: claimed category vs. actual category observed in Chrome
 2. **Switch to the actual category's SOP** for tier/verdict evaluation — do NOT use the claimed category's SOP
-3. Re-read the correct `sop-{actual}.md` (Part A for investigation + Part B for verdict)
+3. Re-read the correct SOP for the current sub-skill: `skills/seller-investigate/references/sop-{actual}.md` if you're still investigating, `skills/seller-verdict/references/sop-{actual}.md` if you're issuing the verdict. Each sub-skill owns its own scoped SOP — they share filenames but not content.
 4. In the final verdict, explicitly flag the mismatch with: "⚠️ CATEGORY MISMATCH: Seller applied as [{claimed}] but actual content is [{actual}]. Evaluated using [{actual}] SOP."
 5. If the mismatch is severe (completely unrelated categories), add this to Risk Flags and consider recommending REVIEW so a human can confirm the reassignment
 
